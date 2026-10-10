@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/sipeed/picoclaw/pkg/honcho"
 	"github.com/sipeed/picoclaw/pkg/isolation"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/media"
@@ -18,6 +19,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/routing"
 	"github.com/sipeed/picoclaw/pkg/session"
 	"github.com/sipeed/picoclaw/pkg/tools"
+	memorytool "github.com/sipeed/picoclaw/pkg/tools/memory"
 )
 
 // AgentInstance represents a fully configured agent with its own workspace,
@@ -58,6 +60,12 @@ type AgentInstance struct {
 	// LightProvider is the concrete provider instance for the configured light model.
 	// It is only used when routing selects the light tier for a turn.
 	LightProvider providers.LLMProvider
+	// Memory drives the async long-term memory extraction pipeline.
+	// Nil when memory extraction is disabled.
+	Memory *MemoryManager
+	// Honcho drives optional sync of conversation transcripts to a Honcho server.
+	// Nil when Honcho sync is disabled.
+	Honcho *HonchoSyncer
 	// CandidateProviders maps candidate identity keys to per-candidate LLMProvider
 	// instances. Config-index keys preserve duplicate model_list entries while
 	// provider/model keys remain available for callers without a config identity.
@@ -171,7 +179,17 @@ func NewAgentInstance(
 			mcpDiscoveryActive && cfg.Tools.MCP.Discovery.UseBM25,
 			mcpDiscoveryActive && cfg.Tools.MCP.Discovery.UseRegex,
 		).
-		WithSplitOnMarker(cfg.Agents.Defaults.SplitOnMarker)
+		WithSplitOnMarker(cfg.Agents.Defaults.SplitOnMarker).
+		WithMemory(MemoryOptions{
+			LongTermCharLimit:  cfg.Agents.Defaults.Memory.EffectiveLongTermCharLimit(),
+			DailyNotesEnabled:  cfg.Agents.Defaults.Memory.DailyNotesEnabled,
+			DailyNoteCharLimit: cfg.Agents.Defaults.Memory.EffectiveDailyNoteCharLimit(),
+			DailyNotesDays:     cfg.Agents.Defaults.Memory.EffectiveDailyNotesDays(),
+		})
+
+	if cfg.Agents.Defaults.Memory.Enabled && cfg.Tools.IsToolEnabled("memory") {
+		toolsRegistry.Register(memorytool.NewMemoryTool(contextBuilder.Memory()))
+	}
 
 	agentID := routing.DefaultAgentID
 	agentName := ""
@@ -320,7 +338,9 @@ func NewAgentInstance(
 		}
 	}
 
-	return &AgentInstance{
+	memCfg := cfg.Agents.Defaults.Memory
+
+	instance := &AgentInstance{
 		modelMu:                   &sync.RWMutex{},
 		ID:                        agentID,
 		Name:                      agentName,
@@ -350,6 +370,34 @@ func NewAgentInstance(
 		LightProvider:             lightProvider,
 		CandidateProviders:        candidateProviders,
 	}
+
+	if memCfg.Enabled && memCfg.ExtractEnabled {
+		instance.Memory = newMemoryManager(
+			instance,
+			contextBuilder.Memory(),
+			MemoryExtractOptions{
+				EveryTurns: memCfg.EffectiveExtractEveryTurns(),
+				Model:      memCfg.ExtractModel,
+			},
+			cfg.FilterSensitiveData,
+		)
+	}
+
+	if memCfg.Enabled && memCfg.Honcho.Enabled {
+		instance.Honcho = newHonchoSyncer(
+			instance,
+			honcho.New(memCfg.Honcho.EffectiveBaseURL(), memCfg.Honcho.APIKey),
+			honchoConfig{
+				WorkspaceID: memCfg.Honcho.WorkspaceID,
+				UserPeerID:  memCfg.Honcho.EffectiveUserPeerID(),
+				TriggerAuto: !memCfg.Honcho.AskFirst(),
+				EveryTurns:  memCfg.Honcho.EffectiveSyncEveryTurns(),
+			},
+			cfg.FilterSensitiveData,
+		)
+	}
+
+	return instance
 }
 
 // populateCandidateProvidersFromNames resolves each model name (alias or

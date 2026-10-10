@@ -42,6 +42,22 @@ func DefaultConfig() *Config {
 				SplitOnMarker:       false,
 				MaxLLMRetries:       2,
 				LLMRetryBackoffSecs: 2,
+				Memory: MemoryConfig{
+					Enabled:            true,
+					LongTermCharLimit:  DefaultMemoryLongTermCharLimit,
+					DailyNotesEnabled:  true,
+					DailyNotesDays:     DefaultMemoryDailyNotesDays,
+					DailyNoteCharLimit: DefaultMemoryDailyNoteCharLimit,
+					ExtractEnabled:     false,
+					ExtractEveryTurns:  DefaultMemoryExtractEveryTurns,
+					Honcho: HonchoMemoryConfig{
+						Enabled:        false,
+						BaseURL:        DefaultHonchoBaseURL,
+						UserPeerID:     DefaultHonchoUserPeerID,
+						Trigger:        HonchoTriggerAsk,
+						SyncEveryTurns: DefaultMemorySyncEveryTurns,
+					},
+				},
 			},
 		},
 		Session: SessionConfig{
@@ -424,6 +440,9 @@ func DefaultConfig() *Config {
 			},
 			SendTTS: ToolConfig{
 				Enabled: false,
+			},
+			Memory: ToolConfig{
+				Enabled: true,
 			},
 			MCP: MCPConfig{
 				ToolConfig: ToolConfig{

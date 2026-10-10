@@ -166,7 +166,7 @@ function ToolCard({
   const isToggledOn = tool.status !== "disabled"
   const isDisabled = tool.status === "disabled"
   const isBlocked = tool.status === "blocked"
-  const isWebSearchTool = tool.name === "web_search"
+  const isMemoryTool = tool.name === "memory"
 
   return (
     <Card
@@ -202,7 +202,21 @@ function ToolCard({
                 <IconSettings className="size-4" />
               </Button>
             )}
-            <Switch
+            {isMemoryTool && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={onOpenWebSearchSettings}
+                className="text-muted-foreground hover:text-foreground hover:bg-muted/60 size-8 rounded-lg"
+                aria-label={t(
+                  "pages.agent.tools.memory.open_settings",
+                  "Open Memory Settings",
+                )}
+              >
+                <IconSettings className="size-4" />
+              </Button>
+            )}
               checked={isToggledOn}
               disabled={isPending}
               onCheckedChange={(checked) => onToggleTool(tool.name, checked)}

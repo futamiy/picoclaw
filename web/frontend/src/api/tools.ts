@@ -97,3 +97,96 @@ export async function updateWebSearchConfig(
     body: JSON.stringify(payload),
   })
 }
+
+export interface HonchoConfig {
+  enabled: boolean
+  base_url?: string
+  api_key_set: boolean
+  api_key?: string
+  clear_api_key?: boolean
+  workspace_id?: string
+  user_peer_id?: string
+  trigger: "auto" | "ask"
+  sync_every_turns: number
+}
+
+export interface MemoryConfigResponse {
+  enabled: boolean
+  long_term_char_limit: number
+  daily_notes_enabled: boolean
+  daily_notes_days: number
+  daily_note_char_limit: number
+  extract_enabled: boolean
+  extract_every_turns: number
+  extract_model?: string
+  honcho: HonchoConfig
+}
+
+export interface HonchoPendingItem {
+  agent_id: string
+  session_key: string
+  message_count: number
+  scanned_turns: number
+  created_at: string
+  preview?: string
+}
+
+export async function getMemoryConfig(): Promise<MemoryConfigResponse> {
+  return request<MemoryConfigResponse>("/api/tools/memory-config")
+}
+
+export async function updateMemoryConfig(
+  payload: MemoryConfigResponse,
+): Promise<ToolActionResponse> {
+  return request<ToolActionResponse>("/api/tools/memory-config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function getHonchoPending(): Promise<{
+  pending: HonchoPendingItem[]
+}> {
+  return request<{ pending: HonchoPendingItem[] }>(
+    "/api/tools/memory/honcho/pending",
+  )
+}
+
+export async function approveHoncho(
+  agentId: string,
+  sessionKey: string,
+): Promise<ToolActionResponse> {
+  return request<ToolActionResponse>("/api/tools/memory/honcho/approve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ agent_id: agentId, session_key: sessionKey }),
+  })
+}
+
+export async function dismissHoncho(
+  agentId: string,
+  sessionKey: string,
+): Promise<ToolActionResponse> {
+  return request<ToolActionResponse>("/api/tools/memory/honcho/dismiss", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ agent_id: agentId, session_key: sessionKey }),
+  })
+}
+
+export async function testHoncho(
+  baseUrl?: string,
+  apiKey?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const res = await launcherFetch("/api/tools/memory/honcho/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ base_url: baseUrl ?? "", api_key: apiKey ?? "" }),
+  })
+  const body = (await res.json().catch(() => ({ ok: false }))) as {
+    ok: boolean
+    error?: string
+  }
+  return body
+}

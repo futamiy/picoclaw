@@ -71,6 +71,16 @@ func (cb *ContextBuilder) WithSplitOnMarker(enabled bool) *ContextBuilder {
 	return cb
 }
 
+// WithMemory reconfigures the memory store limits/options. Must be called
+// before the system prompt cache is built.
+func (cb *ContextBuilder) WithMemory(opts MemoryOptions) *ContextBuilder {
+	cb.memory = NewMemoryStoreWithOptions(cb.workspace, opts)
+	return cb
+}
+
+// Memory returns the context builder's memory store.
+func (cb *ContextBuilder) Memory() *MemoryStore { return cb.memory }
+
 func (cb *ContextBuilder) WithAgentDiscovery(
 	agentID string,
 	discover func(agentID string) []AgentDescriptor,
@@ -164,7 +174,9 @@ func (cb *ContextBuilder) getIdentity(includeToolUseRule bool) string {
 		rules = append(
 			rules,
 			fmt.Sprintf(
-				"**Memory** - When interacting with me if something seems memorable, update %s/memory/MEMORY.md",
+				"**Memory** - When something seems worth remembering, use the `memory` tool "+
+					"(action `add`/`replace`/`remove`; or `note` for dated daily context) instead of "+
+					"editing %s/memory/MEMORY.md directly. Keep entries concise; the store is bounded.",
 				workspacePath,
 			),
 		)
@@ -539,6 +551,9 @@ func (cb *ContextBuilder) sourcePaths() []string {
 	agentDefinition := cb.LoadAgentDefinition()
 	paths := agentDefinition.trackedPaths(cb.workspace)
 	paths = append(paths, filepath.Join(cb.workspace, "memory", "MEMORY.md"))
+	if cb.memory != nil && cb.memory.DailyNotesEnabled() {
+		paths = append(paths, cb.memory.recentDailyNotePaths(cb.memory.opts.DailyNotesDays)...)
+	}
 	return uniquePaths(paths)
 }
 

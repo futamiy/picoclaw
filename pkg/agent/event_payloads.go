@@ -113,6 +113,35 @@ type SessionSummarizePayload struct {
 	OmittedOversized   bool
 }
 
+// MemoryExtractPayload describes a completed async long-term memory extraction.
+type MemoryExtractPayload struct {
+	SessionKey   string
+	Additions    int
+	Replacements int
+	Removals     int
+	Notes        int
+	ScannedTurns int
+}
+
+// HonchoSyncedPayload describes a successful Honcho transcript sync.
+type HonchoSyncedPayload struct {
+	SessionKey   string
+	AgentID      string
+	MessageCount int
+	WorkspaceID  string
+}
+
+// HonchoAwaitingApprovalPayload describes a staged Honcho batch awaiting user
+// approval.
+type HonchoAwaitingApprovalPayload struct {
+	SessionKey   string
+	AgentID      string
+	MessageCount int
+	ScannedTurns int
+	CreatedAt    string
+	WorkspaceID  string
+}
+
 // ToolExecStartPayload describes a tool execution request.
 type ToolExecStartPayload struct {
 	Tool      string

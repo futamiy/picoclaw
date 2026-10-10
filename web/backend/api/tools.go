@@ -161,6 +161,12 @@ var toolCatalog = []toolCatalogEntry{
 		ConfigKey:   "spawn_status",
 	},
 	{
+		Name:        "memory",
+		Description: "Persist and recall durable long-term memory notes across sessions.",
+		Category:    "memory",
+		ConfigKey:   "memory",
+	},
+	{
 		Name:        "i2c",
 		Description: "Interact with I2C hardware devices exposed on the host.",
 		Category:    "hardware",
@@ -197,6 +203,12 @@ func (h *Handler) registerToolRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/tools/{name}/state", h.handleUpdateToolState)
 	mux.HandleFunc("GET /api/tools/web-search-config", h.handleGetWebSearchConfig)
 	mux.HandleFunc("PUT /api/tools/web-search-config", h.handleUpdateWebSearchConfig)
+	mux.HandleFunc("GET /api/tools/memory-config", h.handleGetMemoryConfig)
+	mux.HandleFunc("PUT /api/tools/memory-config", h.handleUpdateMemoryConfig)
+	mux.HandleFunc("GET /api/tools/memory/honcho/pending", h.handleListHonchoPending)
+	mux.HandleFunc("POST /api/tools/memory/honcho/approve", h.handleApproveHoncho)
+	mux.HandleFunc("POST /api/tools/memory/honcho/dismiss", h.handleDismissHoncho)
+	mux.HandleFunc("POST /api/tools/memory/honcho/test", h.handleTestHoncho)
 }
 
 func (h *Handler) handleListTools(w http.ResponseWriter, r *http.Request) {
@@ -270,6 +282,8 @@ func buildToolSupport(cfg *config.Config) []toolSupportItem {
 			status, reasonCode = resolveDiscoveryToolSupport(cfg, cfg.Tools.MCP.Discovery.UseBM25)
 		case "web_search":
 			status, reasonCode = resolveWebSearchToolSupport(cfg)
+		case "memory":
+			status, reasonCode = resolveMemoryToolSupport(cfg)
 		case "i2c", "spi":
 			status, reasonCode = resolveHardwareToolSupport(cfg.Tools.IsToolEnabled(entry.ConfigKey))
 		case "serial":
@@ -358,6 +372,11 @@ func applyToolState(cfg *config.Config, toolName string, enabled bool) error {
 		cfg.Tools.Message.Enabled = enabled
 	case "send_file":
 		cfg.Tools.SendFile.Enabled = enabled
+	case "memory":
+		cfg.Tools.Memory.Enabled = enabled
+		if enabled {
+			cfg.Agents.Defaults.Memory.Enabled = true
+		}
 	case "find_skills":
 		cfg.Tools.FindSkills.Enabled = enabled
 		if enabled {
@@ -401,6 +420,16 @@ func applyToolState(cfg *config.Config, toolName string, enabled bool) error {
 		return fmt.Errorf("tool %q cannot be updated", toolName)
 	}
 	return nil
+}
+
+func resolveMemoryToolSupport(cfg *config.Config) (string, string) {
+	if !cfg.Agents.Defaults.Memory.Enabled {
+		return "blocked", "requires_memory"
+	}
+	if cfg.Tools.IsToolEnabled("memory") {
+		return "enabled", ""
+	}
+	return "disabled", ""
 }
 
 func (h *Handler) handleGetWebSearchConfig(w http.ResponseWriter, r *http.Request) {

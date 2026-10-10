@@ -1,0 +1,127 @@
+package agent
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// newTestMemoryStore builds a store with a tiny cap so over-limit behavior is easy to assert.
+func newTestMemoryStore(t *testing.T, capLimit int) *MemoryStore {
+	t.Helper()
+	return NewMemoryStoreWithOptions(t.TempDir(), MemoryOptions{
+		LongTermCharLimit:  capLimit,
+		DailyNotesEnabled:  true,
+		DailyNoteCharLimit: capLimit,
+		DailyNotesDays:     3,
+	})
+}
+
+func TestMemoryStore_WriteLimitRejected(t *testing.T) {
+	ms := newTestMemoryStore(t, 10)
+	err := ms.WriteLongTerm(strings.Repeat("x", 11))
+	if err == nil || !strings.Contains(err.Error(), "memory limit exceeded") {
+		t.Fatalf("expected ErrMemoryFull, got %v", err)
+	}
+	if got := ms.ReadLongTerm(); got != "" {
+		t.Fatalf("write must be rejected and not persisted, got %q", got)
+	}
+}
+
+func TestMemoryStore_AddReplaceRemove(t *testing.T) {
+	ms := newTestMemoryStore(t, 100000)
+
+	if err := ms.AddLongTerm("user prefers concise answers"); err != nil {
+		t.Fatalf("AddLongTerm: %v", err)
+	}
+	// Exact duplicate must be ignored.
+	if err := ms.AddLongTerm("user prefers concise answers"); err != nil {
+		t.Fatalf("duplicate AddLongTerm: %v", err)
+	}
+	if got := strings.Count(ms.ReadLongTerm(), "concise"); got != 1 {
+		t.Fatalf("expected 1 entry, got %d", got)
+	}
+
+	if err := ms.ReplaceLongTerm("prefers", "likes"); err != nil {
+		t.Fatalf("ReplaceLongTerm: %v", err)
+	}
+	if !strings.Contains(ms.ReadLongTerm(), "likes concise") {
+		t.Fatalf("replacement not applied: %q", ms.ReadLongTerm())
+	}
+
+	if err := ms.RemoveLongTerm("does-not-exist"); err == nil {
+		t.Fatal("expected error on removing a non-matching entry")
+	}
+	if err := ms.RemoveLongTerm("likes"); err != nil {
+		t.Fatalf("RemoveLongTerm: %v", err)
+	}
+	if got := ms.ReadLongTerm(); strings.TrimSpace(got) != "" {
+		t.Fatalf("expected empty memory after remove, got %q", got)
+	}
+}
+
+func TestMemoryStore_DailyNotes(t *testing.T) {
+	ms := newTestMemoryStore(t, 100000)
+
+	if err := ms.AppendToday("implemented FTS5 retrieval"); err != nil {
+		t.Fatalf("AppendToday: %v", err)
+	}
+	// Daily note must include today's header.
+	notes := ms.GetRecentDailyNotes(1)
+	if !strings.Contains(notes, "implemented FTS5 retrieval") {
+		t.Fatalf("recent notes missing entry: %q", notes)
+	}
+
+	small := NewMemoryStoreWithOptions(t.TempDir(), MemoryOptions{
+		DailyNotesEnabled:  true,
+		DailyNoteCharLimit: 5,
+	})
+	if err := small.AppendToday("way too long"); err == nil {
+		t.Fatal("expected ErrMemoryFull on oversized daily note")
+	}
+}
+
+func TestMemoryStore_GetMemoryContext(t *testing.T) {
+	ms := newTestMemoryStore(t, 1000)
+	_ = ms.WriteLongTerm("stay grounded\n")
+	_ = ms.AppendToday("power went out at 3pm")
+
+	ctx := ms.GetMemoryContext()
+	for _, want := range []string{"## Long-term Memory", "stay grounded", "## Recent Daily Notes", "power went out at 3pm"} {
+		if !strings.Contains(ctx, want) {
+			t.Errorf("context missing %q:\n%s", want, ctx)
+		}
+	}
+
+	// Disabled daily notes must render long-term memory only.
+	ms.opts.DailyNotesEnabled = false
+	ctx = ms.GetMemoryContext()
+	if strings.Contains(ctx, "Recent Daily Notes") {
+		t.Errorf("daily notes should be excluded when disabled: %s", ctx)
+	}
+}
+
+func TestMemoryStore_GetMemoryContextTruncatesOverLimit(t *testing.T) {
+	dir := t.TempDir()
+	ms := NewMemoryStoreWithOptions(dir, MemoryOptions{
+		LongTermCharLimit: 10,
+		DailyNotesEnabled: false,
+	})
+	// Oversized content arrives via hand-editing or a lowered limit; reads must stay bounded.
+	if err := os.WriteFile(filepath.Join(dir, "memory", "MEMORY.md"), []byte(strings.Repeat("x", 100)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := ms.GetMemoryContext()
+	if !strings.Contains(ctx, "[memory truncated]") {
+		t.Fatalf("expected truncation marker, got %q", ctx)
+	}
+}
+
+func TestMemoryStore_PathLayout(t *testing.T) {
+	dir := t.TempDir()
+	_ = NewMemoryStoreWithOptions(dir, DefaultMemoryOptions())
+	if _, err := os.Stat(filepath.Join(dir, "memory")); err != nil {
+		t.Fatalf("memory dir should be created: %v", err)
+	}
+}

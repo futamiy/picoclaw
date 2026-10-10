@@ -24,6 +24,11 @@ const tabs: Array<{
     translationKey: "pages.agent.tools.web_search.title",
     defaultLabel: "Web Search",
   },
+  {
+    key: "memory",
+    translationKey: "pages.agent.tools.memory.title",
+    defaultLabel: "Memory",
+  },
 ]
 
 export function ToolsTabs({ activeTab, onChange }: ToolsTabsProps) {

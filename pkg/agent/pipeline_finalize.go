@@ -76,6 +76,16 @@ func (p *Pipeline) Finalize(
 		)
 	}
 
+	// Async long-term memory extraction, gated by its own turn cadence.
+	if mm := ts.agent.Memory; mm != nil {
+		mm.MaybeExtract(al, ts.sessionKey)
+	}
+
+	// Optional Honcho transcript sync, gated by its own turn cadence.
+	if hs := ts.agent.Honcho; hs != nil {
+		hs.MaybeSyncHoncho(al, ts.sessionKey)
+	}
+
 	contextUsage := computeContextUsage(ts.agent, ts.sessionKey)
 	streamErr := finalizeConfiguredStreamingLLM(turnCtx, ts, exec, finalContent, contextUsage)
 	// If streaming never became visible, keep the legacy Pico interim publish path

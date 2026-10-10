@@ -420,6 +420,128 @@ type ToolFeedbackConfig struct {
 	SeparateMessages bool `json:"separate_messages" env:"PICOCLAW_AGENTS_DEFAULTS_TOOL_FEEDBACK_SEPARATE_MESSAGES"`
 }
 
+// MemoryConfig configures the agent's persistent memory store.
+// Long-term memory lives in workspace/memory/MEMORY.md (bounded); daily notes
+// live in workspace/memory/YYYYMM/YYYYMMDD.md. Distilled from Hermes Agent.
+type MemoryConfig struct {
+	// Enabled controls whether the `memory` tool is registered and memory is injected.
+	Enabled bool `json:"enabled" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_ENABLED"`
+	// LongTermCharLimit caps MEMORY.md size; writes that exceed it are rejected
+	// so the agent must condense first.
+	LongTermCharLimit int `json:"long_term_char_limit" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_LONG_TERM_CHAR_LIMIT"`
+	// DailyNotesEnabled controls whether dated daily notes are written/read.
+	DailyNotesEnabled bool `json:"daily_notes_enabled" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_DAILY_NOTES_ENABLED"`
+	// DailyNotesDays is how many recent days of notes are injected into the prompt.
+	DailyNotesDays int `json:"daily_notes_days" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_DAILY_NOTES_DAYS"`
+	// DailyNoteCharLimit caps each daily note file size.
+	DailyNoteCharLimit int `json:"daily_note_char_limit" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_DAILY_NOTE_CHAR_LIMIT"`
+	// ExtractEnabled enables the end-of-turn memory extraction pipeline.
+	ExtractEnabled bool `json:"extract_enabled" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_EXTRACT_ENABLED"`
+	// ExtractEveryTurns runs extraction once every N completed turns (min 1). 0 disables.
+	ExtractEveryTurns int `json:"extract_every_turns" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_EXTRACT_EVERY_TURNS"`
+	// ExtractModel optionally overrides the model used for extraction (cheaper model).
+	ExtractModel string `json:"extract_model,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_EXTRACT_MODEL"`
+	// Honcho is an optional external memory sink: conversation transcripts are
+	// pushed to a Honcho (https://honcho.dev) workspace where it reasons over
+	// them in the background to build peer representations.
+	Honcho HonchoMemoryConfig `json:"honcho,omitempty"`
+}
+
+// HonchoMemoryConfig configures pushing conversation transcripts to a Honcho
+// server (managed at api.honcho.dev or a self-hosted instance).
+type HonchoMemoryConfig struct {
+	// Enabled enables transcript syncing to Honcho.
+	Enabled bool `json:"enabled" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_HONCHO_ENABLED"`
+	// BaseURL is the Honcho server base URL.
+	BaseURL string `json:"base_url,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_HONCHO_BASE_URL"`
+	// APIKey authenticates against the Honcho server (Bearer token).
+	APIKey string `json:"api_key,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_HONCHO_API_KEY"`
+	// WorkspaceID scopes Honcho data. Empty uses the agent ID.
+	WorkspaceID string `json:"workspace_id,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_HONCHO_WORKSPACE_ID"`
+	// UserPeerID is the Honcho peer representing the human user.
+	UserPeerID string `json:"user_peer_id,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_HONCHO_USER_PEER_ID"`
+	// Trigger controls how transcripts are sent: "auto" pushes without asking;
+	// "ask" stages a pending batch that the user must approve first.
+	Trigger string `json:"trigger,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_HONCHO_TRIGGER"`
+	// SyncEveryTurns syncs once every N completed turns (min 1). 0 uses the default.
+	SyncEveryTurns int `json:"sync_every_turns,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_HONCHO_SYNC_EVERY_TURNS"`
+}
+
+const (
+	DefaultMemoryLongTermCharLimit  = 2200
+	DefaultMemoryDailyNoteCharLimit = 2200
+	DefaultMemoryDailyNotesDays     = 3
+	DefaultMemoryExtractEveryTurns  = 10
+	DefaultMemorySyncEveryTurns     = 10
+	DefaultHonchoBaseURL            = "https://api.honcho.dev"
+	DefaultHonchoUserPeerID         = "user"
+	// HonchoTriggerAuto pushes transcripts without asking the user.
+	HonchoTriggerAuto = "auto"
+	// HonchoTriggerAsk stages a pending batch awaiting user approval.
+	HonchoTriggerAsk = "ask"
+)
+
+// EffectiveLongTermCharLimit returns the configured cap or the default.
+func (m MemoryConfig) EffectiveLongTermCharLimit() int {
+	if m.LongTermCharLimit > 0 {
+		return m.LongTermCharLimit
+	}
+	return DefaultMemoryLongTermCharLimit
+}
+
+// EffectiveDailyNoteCharLimit returns the configured cap or the default.
+func (m MemoryConfig) EffectiveDailyNoteCharLimit() int {
+	if m.DailyNoteCharLimit > 0 {
+		return m.DailyNoteCharLimit
+	}
+	return DefaultMemoryDailyNoteCharLimit
+}
+
+// EffectiveDailyNotesDays returns the configured window or the default.
+func (m MemoryConfig) EffectiveDailyNotesDays() int {
+	if m.DailyNotesDays > 0 {
+		return m.DailyNotesDays
+	}
+	return DefaultMemoryDailyNotesDays
+}
+
+// EffectiveExtractEveryTurns returns the configured cadence or the default.
+func (m MemoryConfig) EffectiveExtractEveryTurns() int {
+	if m.ExtractEveryTurns > 0 {
+		return m.ExtractEveryTurns
+	}
+	return DefaultMemoryExtractEveryTurns
+}
+
+// EffectiveBaseURL returns the configured Honcho server or the default.
+func (h HonchoMemoryConfig) EffectiveBaseURL() string {
+	if s := strings.TrimSpace(h.BaseURL); s != "" {
+		return strings.TrimRight(s, "/")
+	}
+	return DefaultHonchoBaseURL
+}
+
+// EffectiveUserPeerID returns the configured user peer or the default.
+func (h HonchoMemoryConfig) EffectiveUserPeerID() string {
+	if s := strings.TrimSpace(h.UserPeerID); s != "" {
+		return s
+	}
+	return DefaultHonchoUserPeerID
+}
+
+// EffectiveSyncEveryTurns returns the configured cadence or the default.
+func (h HonchoMemoryConfig) EffectiveSyncEveryTurns() int {
+	if h.SyncEveryTurns > 0 {
+		return h.SyncEveryTurns
+	}
+	return DefaultMemorySyncEveryTurns
+}
+
+// AskFirst reports whether transcript pushes need explicit user approval.
+func (h HonchoMemoryConfig) AskFirst() bool {
+	return h.Trigger == HonchoTriggerAsk
+}
+
 type AgentDefaults struct {
 	Workspace                 string             `json:"workspace"                        env:"PICOCLAW_AGENTS_DEFAULTS_WORKSPACE"`
 	RestrictToWorkspace       bool               `json:"restrict_to_workspace"            env:"PICOCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
@@ -447,6 +569,7 @@ type AgentDefaults struct {
 	TurnProfile               TurnProfileConfig  `json:"turn_profile,omitempty"`
 	MaxLLMRetries             int                `json:"max_llm_retries,omitempty"        env:"PICOCLAW_AGENTS_DEFAULTS_MAX_LLM_RETRIES"`
 	LLMRetryBackoffSecs       int                `json:"llm_retry_backoff_secs,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_LLM_RETRY_BACKOFF_SECS"`
+	Memory                    MemoryConfig       `json:"memory,omitempty"`
 }
 
 const DefaultMaxMediaSize = 20 * 1024 * 1024 // 20 MB
@@ -1139,8 +1262,9 @@ type ToolsConfig struct {
 	SpawnStatus     ToolConfig         `json:"spawn_status"      yaml:"-"                                                       envPrefix:"PICOCLAW_TOOLS_SPAWN_STATUS_"`
 	SPI             ToolConfig         `json:"spi"               yaml:"-"                                                       envPrefix:"PICOCLAW_TOOLS_SPI_"`
 	Subagent        ToolConfig         `json:"subagent"          yaml:"-"                                                       envPrefix:"PICOCLAW_TOOLS_SUBAGENT_"`
-	WebFetch        ToolConfig         `json:"web_fetch"         yaml:"-"                                                       envPrefix:"PICOCLAW_TOOLS_WEB_FETCH_"`
-	WriteFile       ToolConfig         `json:"write_file"        yaml:"-"                                                       envPrefix:"PICOCLAW_TOOLS_WRITE_FILE_"`
+	WebFetch        ToolConfig         `json:"web_fetch"        yaml:"-"                                                       envPrefix:"PICOCLAW_TOOLS_WEB_FETCH_"`
+	WriteFile       ToolConfig         `json:"write_file"       yaml:"-"                                                       envPrefix:"PICOCLAW_TOOLS_WRITE_FILE_"`
+	Memory          ToolConfig         `json:"memory"           yaml:"-"                                                       envPrefix:"PICOCLAW_TOOLS_MEMORY_"`
 }
 
 // IsFilterSensitiveDataEnabled returns true if sensitive data filtering is enabled
@@ -1907,6 +2031,8 @@ func (t *ToolsConfig) IsToolEnabled(name string) bool {
 		return t.SendTTS.Enabled
 	case "write_file":
 		return t.WriteFile.Enabled
+	case "memory":
+		return t.Memory.Enabled
 	case "mcp":
 		return t.MCP.Enabled
 	default:

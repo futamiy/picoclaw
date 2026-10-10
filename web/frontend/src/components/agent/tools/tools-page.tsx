@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 
 import { PageHeader } from "@/components/page-header"
 
+import { MemoryTab } from "./memory-tab"
 import { ToolLibraryTab } from "./tool-library-tab"
 import { ToolsTabs } from "./tools-tabs"
 import { useToolsPage } from "./use-tools-page"
@@ -66,7 +67,7 @@ export function ToolsPage() {
               onOpenWebSearchSettings={() => setActiveTab("web-search")}
               onToggleTool={toggleTool}
             />
-          ) : (
+          ) : activeTab === "web-search" ? (
             <WebSearchTab
               draft={webSearchDraft}
               providerLabelMap={providerLabelMap}
@@ -79,6 +80,8 @@ export function ToolsPage() {
               onToggleProviderExpand={toggleExpandedProvider}
               onUpdateDraft={updateWebSearchDraft}
             />
+          ) : (
+            <MemoryTab />
           )}
         </div>
       </div>

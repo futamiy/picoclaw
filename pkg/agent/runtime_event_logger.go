@@ -286,6 +286,13 @@ func appendRuntimeEventPayloadSummary(fields map[string]any, payload any) {
 		fields["kept_messages"] = payload.KeptMessages
 		fields["summary_len"] = payload.SummaryLen
 		fields["omitted_oversized"] = payload.OmittedOversized
+	case MemoryExtractPayload:
+		fields["session_key"] = payload.SessionKey
+		fields["additions"] = payload.Additions
+		fields["replacements"] = payload.Replacements
+		fields["removals"] = payload.Removals
+		fields["notes"] = payload.Notes
+		fields["scanned_turns"] = payload.ScannedTurns
 	case ToolExecStartPayload:
 		fields["tool"] = payload.Tool
 		fields["args_count"] = len(payload.Arguments)

@@ -18,6 +18,23 @@
         "enabled": false,
         "max_args_length": 300,
         "separate_messages": false
+      },
+      "memory": {
+        "enabled": true,
+        "long_term_char_limit": 2200,
+        "daily_notes_enabled": true,
+        "daily_notes_days": 3,
+        "daily_note_char_limit": 2200,
+        "extract_enabled": false,
+        "extract_every_turns": 10,
+        "honcho": {
+          "enabled": false,
+          "base_url": "https://api.honcho.dev",
+          "workspace_id": "",
+          "user_peer_id": "user",
+          "trigger": "ask",
+          "sync_every_turns": 10
+        }
       }
     }
   },
@@ -34,13 +51,17 @@
     {
       "model_name": "gpt-5.4",
       "model": "openai/gpt-5.4",
-      "api_keys": ["sk-your-openai-key"],
+      "api_keys": [
+        "sk-your-openai-key"
+      ],
       "api_base": "https://api.openai.com/v1"
     },
     {
       "model_name": "claude-sonnet-4.6",
       "model": "anthropic/claude-sonnet-4.6",
-      "api_keys": ["sk-ant-your-key"],
+      "api_keys": [
+        "sk-ant-your-key"
+      ],
       "api_base": "https://api.anthropic.com/v1",
       "thinking_level": "high"
     },
@@ -48,7 +69,9 @@
       "_comment": "Anthropic Messages API - use native format for direct Anthropic API access",
       "model_name": "claude-opus-4-6",
       "model": "anthropic-messages/claude-opus-4-6",
-      "api_keys": ["sk-ant-your-key"],
+      "api_keys": [
+        "sk-ant-your-key"
+      ],
       "api_base": "https://api.anthropic.com"
     },
     {
@@ -60,17 +83,23 @@
     {
       "model_name": "deepseek",
       "model": "deepseek/deepseek-chat",
-      "api_keys": ["sk-your-deepseek-key"]
+      "api_keys": [
+        "sk-your-deepseek-key"
+      ]
     },
     {
       "model_name": "venice-uncensored",
       "model": "venice/venice-uncensored",
-      "api_keys": ["your-venice-api-key"]
+      "api_keys": [
+        "your-venice-api-key"
+      ]
     },
     {
       "model_name": "nearai-glm",
       "model": "nearai/zai-org/GLM-5.1-FP8",
-      "api_keys": ["your-nearai-api-key"]
+      "api_keys": [
+        "your-nearai-api-key"
+      ]
     },
     {
       "model_name": "lmstudio-local",
@@ -79,30 +108,40 @@
     {
       "model_name": "longcat",
       "model": "longcat/LongCat-Flash-Thinking",
-      "api_keys": ["your-longcat-api-key"]
+      "api_keys": [
+        "your-longcat-api-key"
+      ]
     },
     {
       "model_name": "modelscope-qwen",
       "model": "modelscope/Qwen/Qwen3-235B-A22B-Instruct-2507",
-      "api_keys": ["your-modelscope-access-token"],
+      "api_keys": [
+        "your-modelscope-access-token"
+      ],
       "api_base": "https://api-inference.modelscope.cn/v1"
     },
     {
       "model_name": "azure-gpt5",
       "model": "azure/my-gpt5-deployment",
-      "api_keys": ["your-azure-api-key"],
+      "api_keys": [
+        "your-azure-api-key"
+      ],
       "api_base": "https://your-resource.openai.azure.com"
     },
     {
       "model_name": "loadbalanced-gpt-5.4",
       "model": "openai/gpt-5.4",
-      "api_keys": ["sk-key1"],
+      "api_keys": [
+        "sk-key1"
+      ],
       "api_base": "https://api1.example.com/v1"
     },
     {
       "model_name": "loadbalanced-gpt-5.4",
       "model": "openai/gpt-5.4",
-      "api_keys": ["sk-key2"],
+      "api_keys": [
+        "sk-key2"
+      ],
       "api_base": "https://api2.example.com/v1"
     }
   ],
@@ -110,7 +149,9 @@
     "telegram": {
       "enabled": false,
       "type": "telegram",
-      "allow_from": ["YOUR_USER_ID"],
+      "allow_from": [
+        "YOUR_USER_ID"
+      ],
       "reasoning_channel_id": "",
       "settings": {
         "token": "YOUR_TELEGRAM_BOT_TOKEN",
@@ -173,7 +214,11 @@
       "reasoning_channel_id": "",
       "placeholder": {
         "enabled": true,
-        "text": ["Thinking...", "Processing...", "Typing..."]
+        "text": [
+          "Thinking...",
+          "Processing...",
+          "Typing..."
+        ]
       },
       "settings": {
         "app_id": "",
@@ -213,7 +258,11 @@
       },
       "placeholder": {
         "enabled": true,
-        "text": ["Thinking...", "Processing...", "Typing..."]
+        "text": [
+          "Thinking...",
+          "Processing...",
+          "Typing..."
+        ]
       },
       "reasoning_channel_id": "",
       "settings": {
@@ -310,8 +359,13 @@
         "nickserv_password": "",
         "sasl_user": "",
         "sasl_password": "",
-        "channels": ["#mychannel"],
-        "request_caps": ["server-time", "message-tags"]
+        "channels": [
+          "#mychannel"
+        ],
+        "request_caps": [
+          "server-time",
+          "message-tags"
+        ]
       }
     }
   },
@@ -325,7 +379,9 @@
       "brave": {
         "enabled": false,
         "api_key": "YOUR_BRAVE_API_KEY",
-        "api_keys": ["YOUR_BRAVE_API_KEY"],
+        "api_keys": [
+          "YOUR_BRAVE_API_KEY"
+        ],
         "max_results": 5
       },
       "tavily": {
@@ -337,7 +393,9 @@
       "kagi": {
         "enabled": false,
         "api_key": "",
-        "api_keys": ["YOUR_KAGI_API_KEY"],
+        "api_keys": [
+          "YOUR_KAGI_API_KEY"
+        ],
         "base_url": "https://kagi.com/api/v1/search",
         "max_results": 5
       },
@@ -359,7 +417,9 @@
       "perplexity": {
         "enabled": false,
         "api_key": "pplx-xxx",
-        "api_keys": ["pplx-xxx"],
+        "api_keys": [
+          "pplx-xxx"
+        ],
         "max_results": 5
       },
       "searxng": {
@@ -410,12 +470,19 @@
         "filesystem": {
           "enabled": false,
           "command": "npx",
-          "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+          "args": [
+            "-y",
+            "@modelcontextprotocol/server-filesystem",
+            "/tmp"
+          ]
         },
         "github": {
           "enabled": false,
           "command": "npx",
-          "args": ["-y", "@modelcontextprotocol/server-github"],
+          "args": [
+            "-y",
+            "@modelcontextprotocol/server-github"
+          ],
           "env": {
             "GITHUB_PERSONAL_ACCESS_TOKEN": "YOUR_GITHUB_TOKEN"
           }
@@ -423,7 +490,10 @@
         "brave-search": {
           "enabled": false,
           "command": "npx",
-          "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+          "args": [
+            "-y",
+            "@modelcontextprotocol/server-brave-search"
+          ],
           "env": {
             "BRAVE_API_KEY": "YOUR_BRAVE_API_KEY"
           }
@@ -440,7 +510,10 @@
         "slack": {
           "enabled": false,
           "command": "npx",
-          "args": ["-y", "@modelcontextprotocol/server-slack"],
+          "args": [
+            "-y",
+            "@modelcontextprotocol/server-slack"
+          ],
           "env": {
             "SLACK_BOT_TOKEN": "YOUR_SLACK_BOT_TOKEN",
             "SLACK_TEAM_ID": "YOUR_SLACK_TEAM_ID"
@@ -561,7 +634,9 @@
   "events": {
     "logging": {
       "enabled": true,
-      "include": ["agent.*"],
+      "include": [
+        "agent.*"
+      ],
       "exclude": [],
       "min_severity": "info",
       "include_payload": false

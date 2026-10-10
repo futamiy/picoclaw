@@ -19,6 +19,13 @@ const (
 	KindAgentContextCompress Kind = "agent.context.compress"
 	// KindAgentSessionSummarize is emitted when session summarization completes.
 	KindAgentSessionSummarize Kind = "agent.session.summarize"
+	// KindAgentMemoryExtract is emitted when long-term memory extraction completes.
+	KindAgentMemoryExtract Kind = "agent.memory.extract"
+	// KindAgentMemoryHonchoSynced is emitted when a Honcho transcript sync succeeds.
+	KindAgentMemoryHonchoSynced Kind = "agent.memory.honcho.synced"
+	// KindAgentMemoryHonchoAwaitingApproval is emitted when a Honcho batch
+	// was staged and awaits user approval.
+	KindAgentMemoryHonchoAwaitingApproval Kind = "agent.memory.honcho.awaiting_approval"
 
 	// KindAgentToolExecStart is emitted before a tool executes.
 	KindAgentToolExecStart Kind = "agent.tool.exec_start"
@@ -114,6 +121,9 @@ var knownKinds = []Kind{
 	KindAgentLLMRetry,
 	KindAgentContextCompress,
 	KindAgentSessionSummarize,
+	KindAgentMemoryExtract,
+	KindAgentMemoryHonchoSynced,
+	KindAgentMemoryHonchoAwaitingApproval,
 	KindAgentToolExecStart,
 	KindAgentToolExecEnd,
 	KindAgentToolExecSkipped,
