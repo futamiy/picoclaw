@@ -76,3 +76,52 @@ func SaveCompressMarkdown(rows []CompressCycleResult, outDir string) error {
 		0o644,
 	)
 }
+
+// ChatScorecardMarkdown renders chat A/B rows as a Markdown table, sorted by
+// recall descending so the highest-fidelity configuration leads.
+func ChatScorecardMarkdown(rows []ChatVariantResult) string {
+	sorted := append([]ChatVariantResult(nil), rows...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].RecallPct > sorted[j].RecallPct
+	})
+
+	var b strings.Builder
+	b.WriteString("| policy | recall | tokens before | tokens after | kept | freed | sec | slight | compress | honcho |\n")
+	b.WriteString("|---|---|---|---|---|---|---|---|---|---|\n")
+	for _, r := range sorted {
+		slight := "no"
+		if r.Slight {
+			slight = "yes"
+		}
+		fmt.Fprintf(&b, "| %s | %.1f%% | %d | %d | %.1f%% | %.1f%% | %.2f | %s | %t | %t |\n",
+			r.Policy, r.RecallPct, r.BeforeTokens, r.AfterTokens, r.KeptPct, r.FreedPct,
+			r.CompressSeconds, slight, r.AutoComp, r.HonchoRec)
+	}
+	return b.String()
+}
+
+// PrintChatScorecard prints chat A/B rows as a terminal table.
+func PrintChatScorecard(rows []ChatVariantResult) {
+	sorted := append([]ChatVariantResult(nil), rows...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].RecallPct > sorted[j].RecallPct
+	})
+
+	fmt.Printf("\n--- Chat A/B (original vs modified) ---\n")
+	fmt.Printf("%-28s %-8s %-14s %-13s %-8s %-8s %-6s %-8s %-8s\n",
+		"policy", "recall", "tokens before", "tokens after", "kept", "freed", "sec", "compress", "honcho")
+	fmt.Println(strings.Repeat("-", 110))
+	for _, r := range sorted {
+		fmt.Printf("%-28s %-8s %-14d %-13d %-8s %-8s %-6.2f %-8t %-8t\n",
+			r.Policy,
+			fmt.Sprintf("%.1f%%", r.RecallPct),
+			r.BeforeTokens,
+			r.AfterTokens,
+			fmt.Sprintf("%.1f%%", r.KeptPct),
+			fmt.Sprintf("%.1f%%", r.FreedPct),
+			r.CompressSeconds,
+			r.AutoComp,
+			r.HonchoRec,
+		)
+	}
+}

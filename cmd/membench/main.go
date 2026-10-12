@@ -96,6 +96,17 @@ func main() {
 	compressCmd.Flags().StringVar(&flagOut, "out", "./bench-out", "output working directory")
 	compressCmd.Flags().IntVar(&flagBudget, "budget", 4000, "token budget for retrieval/compaction")
 
+	chatCmd := &cobra.Command{
+		Use:   "chat",
+		Short: "Replay conversations as chat turns: A/B original vs. modified (auto-compress × Honcho)",
+		RunE:  runChat,
+	}
+	chatCmd.Flags().StringVar(&flagData, "data", "", "LOCOMO dataset directory (required)")
+	chatCmd.Flags().StringVar(&flagOut, "out", "./bench-out", "output working directory")
+	chatCmd.Flags().
+		IntVar(&flagBudget, "budget", 4000, "token budget for compaction/recall")
+	chatCmd.Flags().IntVar(&flagLimit, "limit", 0, "max QA questions per sample (0 = all)")
+
 	runCmd := &cobra.Command{
 		Use:   "run",
 		Short: "Convenience: eval + report (ingestion is done inline)",
@@ -122,7 +133,7 @@ func main() {
 	runCmd.Flags().StringVar(&flagJudgeAPIKey, "judge-api-key", "", "API key for judge model (defaults to --api-key)")
 	runCmd.Flags().IntVar(&flagConcurrency, "concurrency", 1, "number of concurrent QA evaluations")
 
-	rootCmd.AddCommand(ingestCmd, evalCmd, reportCmd, runCmd, compressCmd)
+	rootCmd.AddCommand(ingestCmd, evalCmd, reportCmd, runCmd, compressCmd, chatCmd)
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
@@ -341,6 +352,38 @@ func runCompress(cmd *cobra.Command, args []string) error {
 	}
 	PrintCompressScorecard(rows)
 	log.Printf("compress scorecard written to %s", flagOut)
+	return nil
+}
+
+func runChat(cmd *cobra.Command, args []string) error {
+	if flagData == "" {
+		return fmt.Errorf("--data is required")
+	}
+	ctx := context.Background()
+	samples, err := LoadDataset(flagData)
+	if err != nil {
+		return fmt.Errorf("load dataset: %w", err)
+	}
+	log.Printf("Loaded %d samples", len(samples))
+
+	if flagLimit > 0 {
+		for i := range samples {
+			if len(samples[i].QA) > flagLimit {
+				samples[i].QA = samples[i].QA[:flagLimit]
+			}
+		}
+		log.Printf("Limited to %d QA per sample", flagLimit)
+	}
+
+	rows, err := RunChatAB(ctx, samples, flagOut, flagBudget)
+	if err != nil {
+		return fmt.Errorf("chat A/B: %w", err)
+	}
+	if err := SaveChatResults(rows, flagOut); err != nil {
+		return fmt.Errorf("save chat results: %w", err)
+	}
+	PrintChatScorecard(rows)
+	log.Printf("chat A/B scorecard written to %s", flagOut)
 	return nil
 }
 

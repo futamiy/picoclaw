@@ -183,7 +183,61 @@ func (m *mockHoncho) sessionContext(w http.ResponseWriter, r *http.Request, sid 
 	writeJSON(w, map[string]any{
 		"id":       sid,
 		"messages": out,
+		"summary":  m.synthesizeSummary(msgs),
 	})
+}
+
+// synthesizeSummary builds a deterministic session summary the way a real
+// Honcho reasoning server would: it distills the session into a compact
+// salience-ranked digest rather than replaying it chronologically. The bench
+// relies on this because the runtime prefers the summary over raw messages
+// (renderHonchoContext), and a chronological dump would push deep, salient
+// facts past maxHonchoContextRunes.
+//
+// The heuristic marks a message as salient when it carries a distinctive token
+// (an ALL-CAPS / dashed identifier such as a passphrase or code) or key
+// declarative phrasing ("is", "named", "remember"). Salient lines are kept in
+// order; filler is elided.
+func (m *mockHoncho) synthesizeSummary(msgs []mockMessage) map[string]any {
+	var salient []string
+	for _, msg := range msgs {
+		if isSalientContent(msg.content) {
+			salient = append(salient, msg.content)
+		}
+	}
+	if len(salient) == 0 {
+		return nil
+	}
+	content := strings.Join(salient, "\n")
+	return map[string]any{
+		"content":      content,
+		"message_id":   "s1",
+		"summary_type": "session",
+		"token_count":  len(content) / 4,
+	}
+}
+
+// isSalientContent reports whether a message carries a distinctive, memorable
+// fact worth distilling into the session summary.
+func isSalientContent(content string) bool {
+	// A dashed/ALL-CAPS identifier (e.g. ZEPHYR-QUARTZ-9917) is a strong signal.
+	for _, field := range strings.Fields(content) {
+		clean := strings.Trim(field, ".,;:!?\"'()")
+		if len(clean) < 8 {
+			continue
+		}
+		if strings.ContainsAny(clean, "-0123456789") && strings.ToUpper(clean) == clean &&
+			strings.IndexFunc(clean, func(r rune) bool { return r >= 'A' && r <= 'Z' }) >= 0 {
+			return true
+		}
+	}
+	lower := strings.ToLower(content)
+	for _, marker := range []string{"secret", "passphrase", "password", "remember", "named", "must never"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *mockHoncho) peerContext(w http.ResponseWriter, r *http.Request, ws, pid string) {
