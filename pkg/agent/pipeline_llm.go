@@ -336,7 +336,15 @@ func (p *Pipeline) CallLLM(
 			strings.Contains(errMsg, "request too large"))
 
 		if isTransientError && retry < maxRetries {
-			backoff := time.Duration(retry+1) * time.Duration(backoffSecs) * time.Second
+			// Exponential backoff (like opencode): 2^retry * base.
+			backoff := time.Duration(backoffSecs) * time.Second * time.Duration(1<<retry)
+			// The stream connected and streamed output for a while before being
+			// cut mid-way: the link is alive, so restart the wait at the
+			// first-level retry instead of escalating.
+			if isTruncatedAfterConnectError(err) {
+				retryReason = "reconnect"
+				backoff = time.Duration(backoffSecs) * time.Second
+			}
 			al.emitEvent(
 				runtimeevents.KindAgentLLMRetry,
 				ts.eventMeta("runTurn", "turn.llm.retry"),

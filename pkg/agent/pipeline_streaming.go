@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"time"
@@ -156,6 +157,21 @@ func (p *Pipeline) tryConfiguredStreamingLLM(
 			}
 			return fallbackResponse, true, err
 		}
+		// Mid-stream truncation: the connection was established and streamed
+		// partial output before being cut. Purge the partial (clears the
+		// Telegram draft / deletes the Pico message) and return the raw error
+		// so the retry loop re-streams with a first-level backoff instead of
+		// surfacing to the user.
+		if errors.Is(streamErr, io.ErrUnexpectedEOF) {
+			logger.WarnCF("agent", "ChatStream truncated after visible output; purging partial and retrying", map[string]any{
+				"agent_id": ts.agent.ID,
+				"channel":  ts.channel,
+				"model":    exec.llmModel,
+				"error":    streamErr.Error(),
+			})
+			publisher.Cancel(ctx)
+			return nil, true, truncatedAfterConnectError{err: streamErr}
+		}
 		return nil, true, configuredStreamingVisibleError{err: streamErr}
 	}
 
@@ -211,6 +227,28 @@ func (e configuredStreamingVisibleError) Unwrap() error {
 func isConfiguredStreamingVisibleError(err error) bool {
 	var visibleErr configuredStreamingVisibleError
 	return errors.As(err, &visibleErr)
+}
+
+// truncatedAfterConnectError marks a stream that established a connection and
+// produced output before being cut mid-way (as opposed to failing to connect at
+// all). The retry loop treats it as a fresh failure: it re-streams with the
+// first-level backoff instead of escalating, since the link demonstrably works.
+type truncatedAfterConnectError struct {
+	err error
+}
+
+func (e truncatedAfterConnectError) Error() string {
+	if e.err == nil {
+		return "stream truncated after visible output"
+	}
+	return e.err.Error()
+}
+
+func (e truncatedAfterConnectError) Unwrap() error { return e.err }
+
+func isTruncatedAfterConnectError(err error) bool {
+	var te truncatedAfterConnectError
+	return errors.As(err, &te)
 }
 
 func finalizeConfiguredStreamingLLM(

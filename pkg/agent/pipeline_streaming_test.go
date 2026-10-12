@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"testing"
@@ -760,6 +761,69 @@ func TestConfiguredStreamingLaterUpdateFailureThenStreamSuccessReturnsVisibleErr
 	case outbound := <-msgBus.OutboundChan():
 		t.Fatalf("unexpected fallback outbound after post-visible update failure: %#v", outbound)
 	default:
+	}
+}
+
+func TestConfiguredStreamingTruncationAfterVisibleOutputPurgesAndRetries(t *testing.T) {
+	cfg := newConfiguredStreamingTestConfig(t, true, true, nil)
+	cfg.Agents.Defaults.MaxLLMRetries = 1
+	cfg.Agents.Defaults.LLMRetryBackoffSecs = 1
+	msgBus := bus.NewMessageBus()
+	streamer := &recordingStreamer{}
+	msgBus.SetStreamDelegate(configuredStreamingDelegate{streamer: streamer})
+	provider := &configuredStreamingProvider{
+		streamPlan: []configuredStreamingCall{
+			{
+				chunks: []string{"partial answer"},
+				err:    truncatedStreamError(),
+			},
+			{
+				chunks:   []string{"partial answer", "final answer"},
+				response: &providers.LLMResponse{Content: "final answer"},
+			},
+		},
+		chatResponse: &providers.LLMResponse{Content: "chat fallback should not be used"},
+	}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	got := runConfiguredStreamingTurn(t, al, "pico")
+
+	if got != "final answer" {
+		t.Fatalf("response = %q, want final answer after truncation retry", got)
+	}
+	if provider.streamCalls != 2 {
+		t.Fatalf("stream calls = %d, want 2 (initial + retry)", provider.streamCalls)
+	}
+	if provider.chatCalls != 0 {
+		t.Fatalf("chat calls = %d, want 0 (truncation should re-stream, not fall back to chat)", provider.chatCalls)
+	}
+	if streamer.canceled != 1 {
+		t.Fatalf("streamer canceled = %d, want 1 (partial purged before retry)", streamer.canceled)
+	}
+	if len(streamer.finalized) == 0 || streamer.finalized[len(streamer.finalized)-1] != "final answer" {
+		t.Fatalf("stream finalized = %v, want final answer", streamer.finalized)
+	}
+}
+
+func truncatedStreamError() error {
+	return fmt.Errorf(
+		"stream truncated: connection closed before completion (no [DONE] or finish_reason): %w",
+		io.ErrUnexpectedEOF,
+	)
+}
+
+func TestTruncatedAfterConnectError(t *testing.T) {
+	if !isTruncatedAfterConnectError(truncatedAfterConnectError{err: truncatedStreamError()}) {
+		t.Fatal("isTruncatedAfterConnectError = false for truncatedAfterConnectError wrapper")
+	}
+	if isTruncatedAfterConnectError(truncatedStreamError()) {
+		t.Fatal("isTruncatedAfterConnectError = true for unwrapped truncation error")
+	}
+	if isTruncatedAfterConnectError(errors.New("draft failed")) {
+		t.Fatal("isTruncatedAfterConnectError = true for unrelated error")
+	}
+	if !errors.Is(truncatedAfterConnectError{err: truncatedStreamError()}, io.ErrUnexpectedEOF) {
+		t.Fatal("truncatedAfterConnectError does not unwrap to io.ErrUnexpectedEOF")
 	}
 }
 

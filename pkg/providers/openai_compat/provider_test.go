@@ -3,6 +3,7 @@ package openai_compat
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -1679,6 +1680,62 @@ func TestProviderChatStream_InvalidEventReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "failed to decode stream event") {
 		t.Fatalf("error = %v, want decode stream event error", err)
+	}
+}
+
+func TestProviderChatStream_TruncatedStreamReturnsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"half of\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\" the answer\"}}]}\n\n"))
+	}))
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "")
+	out, err := p.ChatStream(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hi"}},
+		nil,
+		"gpt-4o",
+		nil,
+		nil,
+	)
+	if err == nil {
+		content := ""
+		if out != nil {
+			content = out.Content
+		}
+		t.Fatalf("expected error for truncated stream, got success (content=%q)", content)
+	}
+	if out != nil {
+		t.Fatalf("expected nil response on truncated stream, got %#v", out)
+	}
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("error = %v, want wrapped io.ErrUnexpectedEOF", err)
+	}
+}
+
+func TestProviderChatStream_FinishReasonWithoutDONEIsSuccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n"))
+	}))
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "")
+	out, err := p.ChatStream(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hi"}},
+		nil,
+		"gpt-4o",
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("ChatStream() error = %v", err)
+	}
+	if out.Content != "ok" {
+		t.Fatalf("Content = %q, want %q", out.Content, "ok")
 	}
 }
 

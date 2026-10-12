@@ -632,11 +632,16 @@ func parseStreamResponse(
 	}
 	activeTools := map[int]*toolAccum{}
 
+	// sawDone tracks whether the stream reached a protocol terminator. A clean
+	// early close (no [DONE] and no finish_reason) indicates the upstream
+	// connection dropped mid-stream and must not be reported as success.
+	sawDone := false
 	processEvent := func(data string) error {
 		if strings.TrimSpace(data) == "" {
 			return nil
 		}
 		if strings.TrimSpace(data) == "[DONE]" {
+			sawDone = true
 			return io.EOF
 		}
 
@@ -795,6 +800,13 @@ func parseStreamResponse(
 			Name:      acc.name,
 			Arguments: args,
 		})
+	}
+
+	if !sawDone && finishReason == "" {
+		return nil, fmt.Errorf(
+			"stream truncated: connection closed before completion (no [DONE] or finish_reason): %w",
+			io.ErrUnexpectedEOF,
+		)
 	}
 
 	if finishReason == "" {
