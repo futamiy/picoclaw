@@ -36,7 +36,7 @@ func CompressScorecardMarkdown(rows []CompressCycleResult) string {
 			slight = "yes"
 		}
 		fmt.Fprintf(&b, "| %s | %.1f%% | %d | %d | %.1f%% | %.1f%% | %.2f | %s |\n",
-			r.Policy, r.RecallPct, r.TokensBefore, r.TokensAfter, r.KeptPct, r.FreedPct, r.CycleSeconds, slight)
+			r.Policy, r.RecallPct, r.BeforeTokens, r.AfterTokens, r.KeptPct, r.FreedPct, r.CompressSeconds, slight)
 	}
 	return b.String()
 }
@@ -56,11 +56,11 @@ func PrintCompressScorecard(rows []CompressCycleResult) {
 		fmt.Printf("%-24s %-8s %-14d %-13d %-8s %-8s %-6.2f\n",
 			r.Policy,
 			fmt.Sprintf("%.1f%%", r.RecallPct),
-			r.TokensBefore,
-			r.TokensAfter,
+			r.BeforeTokens,
+			r.AfterTokens,
 			fmt.Sprintf("%.1f%%", r.KeptPct),
 			fmt.Sprintf("%.1f%%", r.FreedPct),
-			r.CycleSeconds,
+			r.CompressSeconds,
 		)
 	}
 }

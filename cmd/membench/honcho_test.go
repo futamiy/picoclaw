@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/sipeed/picoclaw/pkg/honcho"
@@ -137,7 +138,134 @@ func TestEvalHonchoTokenMetrics(t *testing.T) {
 	}
 }
 
-func TestRunCompressCycles(t *testing.T) {
+func TestCompressScorecardMarkdown(t *testing.T) {
+	rows := []CompressCycleResult{
+		{Policy: "leaf/s1", RecallPct: 50, BeforeTokens: 1000, AfterTokens: 800, KeptPct: 80, FreedPct: 20, Slight: true},
+		{Policy: "until_under/s1", RecallPct: 25, BeforeTokens: 1000, AfterTokens: 300, KeptPct: 30, FreedPct: 70, Slight: false},
+	}
+	md := CompressScorecardMarkdown(rows)
+	if !containsFold(md, "| policy |") {
+		t.Errorf("markdown missing header: %s", md)
+	}
+	// Sorted by recall desc → leaf first.
+	if idxLeaf, idxUntil := indexOf(md, "leaf/s1"), indexOf(md, "until_under/s1"); idxLeaf > idxUntil {
+		t.Errorf("rows not sorted by recall desc: %s", md)
+	}
+	if !containsFold(md, "| yes |") || !containsFold(md, "| no |") {
+		t.Errorf("markdown missing slight column values: %s", md)
+	}
+}
+
+// largeSampleWithBuriedEvidence builds a sample whose single QA evidence turn
+// (a unique needle sentence) sits deep inside the compacted region — after
+// enough filler to push it past the summary truncation window (2048 chars) and
+// before the protected fresh tail. This forces a measurable recall drop on
+// aggressive compaction.
+func largeSampleWithBuriedEvidence(nFiller int) LocomoSample {
+	const needle = "The secret passphrase is ZEPHYR-QUARTZ-9917 and it must never be forgotten."
+	var turns []LocomoTurn
+	// Filler first, so the needle lands well past the truncation cut.
+	for i := 0; i < nFiller; i++ {
+		spk := "Alice"
+		if i%2 == 1 {
+			spk = "Bob"
+		}
+		turns = append(turns, LocomoTurn{
+			Speaker: spk,
+			DiaID:   fmt.Sprintf("D1:%d", i+1),
+			Text: fmt.Sprintf(
+				"Filler turn %d about routine logistics, errands, weather, and other mundane chit-chat that carries no memorable content at all.",
+				i,
+			),
+		})
+	}
+	// The needle, buried in the middle of the compacted region.
+	turns = append(turns, LocomoTurn{Speaker: "Alice", DiaID: "D1:needle", Text: needle})
+	// A large protected fresh tail after the needle.
+	for i := 0; i < 60; i++ {
+		spk := "Alice"
+		if i%2 == 1 {
+			spk = "Bob"
+		}
+		turns = append(turns, LocomoTurn{
+			Speaker: spk,
+			DiaID:   fmt.Sprintf("D1:tail%d", i),
+			Text: fmt.Sprintf(
+				"Tail turn %d recapping recent plans and confirmations with nothing distinctive.",
+				i,
+			),
+		})
+	}
+	s1, _ := json.Marshal(turns)
+	return LocomoSample{
+		SampleID: "buried",
+		Conversation: map[string]json.RawMessage{
+			"session_1": s1,
+			"speaker_a": json.RawMessage(`"Alice"`),
+			"speaker_b": json.RawMessage(`"Bob"`),
+		},
+		QA: []LocomoQA{
+			{
+				Question: "What is the secret passphrase?",
+				Answer:   json.RawMessage(`"ZEPHYR-QUARTZ-9917"`),
+				Evidence: []string{"D1:needle"},
+				Category: 1,
+			},
+		},
+	}
+}
+
+func TestCompressRecallDegradation(t *testing.T) {
+	ctx := context.Background()
+	// Enough filler (~150 turns) that compaction splits several leaf chunks and
+	// the needle's chunk summary truncates before reaching it.
+	samples := []LocomoSample{largeSampleWithBuriedEvidence(150)}
+	dir := t.TempDir()
+
+	rows, err := RunCompressCycles(ctx, samples, dir, 400)
+	if err != nil {
+		t.Fatalf("RunCompressCycles: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d", len(rows))
+	}
+
+	byPolicy := map[string]CompressCycleResult{}
+	for _, r := range rows {
+		name := r.Policy
+		if i := indexOf(name, "/"); i >= 0 {
+			name = name[:i]
+		}
+		byPolicy[name] = r
+	}
+
+	leaf, ok := byPolicy["leaf"]
+	if !ok {
+		t.Fatal("missing leaf policy row")
+	}
+	until, ok := byPolicy["until_under"]
+	if !ok {
+		t.Fatal("missing until_under policy row")
+	}
+
+	// Aggressive compaction must free more than the baseline leaf pass.
+	if until.FreedPct <= leaf.FreedPct {
+		t.Errorf("expected until_under to free more than leaf: until=%.1f%% leaf=%.1f%%",
+			until.FreedPct, leaf.FreedPct)
+	}
+
+	// The buried needle should be dropped once its chunk is summarised and
+	// truncated: aggressive compaction must not retain it at 100%.
+	if until.RecallPct >= 100 {
+		t.Errorf("expected recall degradation after aggressive compaction, got %.1f%%", until.RecallPct)
+	}
+	if until.RecallPct > leaf.RecallPct {
+		t.Errorf("aggressive recall (%.1f%%) should be <= leaf recall (%.1f%%)",
+			until.RecallPct, leaf.RecallPct)
+	}
+}
+
+func TestRunCompressCyclesSmall(t *testing.T) {
 	ctx := context.Background()
 	samples := []LocomoSample{syntheticSample()}
 	dir := t.TempDir()
@@ -151,30 +279,12 @@ func TestRunCompressCycles(t *testing.T) {
 		t.Fatalf("expected 2 rows, got %d", len(rows))
 	}
 	for _, r := range rows {
-		if r.TokensBefore == 0 {
-			t.Errorf("row %s: TokensBefore should be > 0", r.Policy)
+		if r.BeforeTokens == 0 {
+			t.Errorf("row %s: BeforeTokens should be > 0", r.Policy)
 		}
 		if r.KeptPct < 0 || r.KeptPct > 100 {
 			t.Errorf("row %s: KeptPct out of range: %v", r.Policy, r.KeptPct)
 		}
-	}
-}
-
-func TestCompressScorecardMarkdown(t *testing.T) {
-	rows := []CompressCycleResult{
-		{Policy: "leaf/s1", RecallPct: 50, TokensBefore: 1000, TokensAfter: 800, KeptPct: 80, FreedPct: 20, Slight: true},
-		{Policy: "until_under/s1", RecallPct: 25, TokensBefore: 1000, TokensAfter: 300, KeptPct: 30, FreedPct: 70, Slight: false},
-	}
-	md := CompressScorecardMarkdown(rows)
-	if !containsFold(md, "| policy |") {
-		t.Errorf("markdown missing header: %s", md)
-	}
-	// Sorted by recall desc → leaf first.
-	if idxLeaf, idxUntil := indexOf(md, "leaf/s1"), indexOf(md, "until_under/s1"); idxLeaf > idxUntil {
-		t.Errorf("rows not sorted by recall desc: %s", md)
-	}
-	if !containsFold(md, "| yes |") || !containsFold(md, "| no |") {
-		t.Errorf("markdown missing slight column values: %s", md)
 	}
 }
 

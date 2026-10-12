@@ -11,18 +11,20 @@ import (
 	"github.com/sipeed/picoclaw/pkg/seahorse"
 )
 
-// CompressCycleResult is one row of the compression scorecard, mirroring the
-// columns the hermes-agent evals/compaction harness emits.
+// CompressCycleResult is one row of the compression scorecard. Field names
+// match the hermes-agent evals/compaction scorecard.json schema
+// (policy, before_tokens, after_tokens, recall_pct, compress_seconds) so the
+// same report.py can render either harness's output.
 type CompressCycleResult struct {
-	Policy     string  `json:"policy"`
-	RecallPct  float64 `json:"recall_pct"`
-	TokensBefore int   `json:"before_tokens"`
-	TokensAfter  int   `json:"after_tokens"`
-	KeptPct      float64 `json:"kept_pct"`
-	FreedPct     float64 `json:"freed_pct"`
-	Slight       bool    `json:"slight"` // freed < SlightFreedThresholdPct
-	CycleSeconds float64 `json:"cycle_seconds"`
-	Questions    int     `json:"questions"`
+	Policy          string  `json:"policy"`
+	RecallPct       float64 `json:"recall_pct"`
+	BeforeTokens    int     `json:"before_tokens"`
+	AfterTokens     int     `json:"after_tokens"`
+	KeptPct         float64 `json:"kept_pct"`
+	FreedPct        float64 `json:"freed_pct"`
+	Slight          bool    `json:"slight"` // freed < SlightFreedThresholdPct
+	CompressSeconds float64 `json:"compress_seconds"`
+	Questions       int     `json:"questions"`
 }
 
 // SlightFreedThresholdPct is the upper bound on freed tokens for a compaction
@@ -191,12 +193,12 @@ func runOneCycle(
 	return CompressCycleResult{
 		Policy:       fmt.Sprintf("%s/%s", pol.name, sample.SampleID),
 		RecallPct:    recall,
-		TokensBefore: before,
-		TokensAfter:  after,
+		BeforeTokens: before,
+		AfterTokens:  after,
 		KeptPct:      kept,
 		FreedPct:     freed,
 		Slight:       freed < SlightFreedThresholdPct,
-		CycleSeconds: elapsed,
+		CompressSeconds: elapsed,
 		Questions:    len(sample.QA),
 	}, nil
 }
@@ -214,10 +216,17 @@ func averageEvidenceCoverage(sample *LocomoSample, contextText string) float64 {
 	return 100 * sum / float64(len(sample.QA))
 }
 
-// SaveCompressResults writes the compress scorecard as JSON.
+// SaveCompressResults writes the compress scorecard as JSON. Two files are
+// emitted:
+//   - compress_scorecard.json (this harness's native name)
+//   - scorecard.json (hermes-agent evals/compaction schema, so report.py can
+//     render it directly with zero glue)
 func SaveCompressResults(rows []CompressCycleResult, outDir string) error {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return fmt.Errorf("create out dir: %w", err)
 	}
-	return writeJSONFile(filepath.Join(outDir, "compress_scorecard.json"), rows)
+	if err := writeJSONFile(filepath.Join(outDir, "compress_scorecard.json"), rows); err != nil {
+		return err
+	}
+	return writeJSONFile(filepath.Join(outDir, "scorecard.json"), rows)
 }
