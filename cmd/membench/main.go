@@ -50,7 +50,8 @@ func main() {
 	}
 	ingestCmd.Flags().StringVar(&flagData, "data", "", "LOCOMO dataset directory (required)")
 	ingestCmd.Flags().StringVar(&flagOut, "out", "./bench-out", "output working directory")
-	ingestCmd.Flags().StringVar(&flagMode, "mode", "all", "modes to ingest: legacy, seahorse, or all")
+	ingestCmd.Flags().
+		StringVar(&flagMode, "mode", "all", "modes to ingest: legacy, seahorse, honcho, all, or all+ (all incl. honcho)")
 
 	evalCmd := &cobra.Command{
 		Use:   "eval",
@@ -59,7 +60,8 @@ func main() {
 	}
 	evalCmd.Flags().StringVar(&flagData, "data", "", "LOCOMO dataset directory (required)")
 	evalCmd.Flags().StringVar(&flagOut, "out", "./bench-out", "output working directory")
-	evalCmd.Flags().StringVar(&flagMode, "mode", "all", "modes to evaluate: legacy, seahorse, or all")
+	evalCmd.Flags().
+		StringVar(&flagMode, "mode", "all", "modes to evaluate: legacy, seahorse, honcho, all, or all+ (all incl. honcho)")
 	evalCmd.Flags().IntVar(&flagBudget, "budget", 4000, "token budget for retrieval")
 	evalCmd.Flags().
 		StringVar(&flagEvalMode, "eval-mode", "token", "evaluation mode: token (direct match) or llm (LLM-as-Judge)")
@@ -85,6 +87,15 @@ func main() {
 	}
 	reportCmd.Flags().StringVar(&flagOut, "out", "./bench-out", "output working directory")
 
+	compressCmd := &cobra.Command{
+		Use:   "compress",
+		Short: "Run picoclaw compaction cycles and score recall vs. tokens",
+		RunE:  runCompress,
+	}
+	compressCmd.Flags().StringVar(&flagData, "data", "", "LOCOMO dataset directory (required)")
+	compressCmd.Flags().StringVar(&flagOut, "out", "./bench-out", "output working directory")
+	compressCmd.Flags().IntVar(&flagBudget, "budget", 4000, "token budget for retrieval/compaction")
+
 	runCmd := &cobra.Command{
 		Use:   "run",
 		Short: "Convenience: eval + report (ingestion is done inline)",
@@ -92,7 +103,7 @@ func main() {
 	}
 	runCmd.Flags().StringVar(&flagData, "data", "", "LOCOMO dataset directory (required)")
 	runCmd.Flags().StringVar(&flagOut, "out", "./bench-out", "output working directory")
-	runCmd.Flags().StringVar(&flagMode, "mode", "all", "modes to run: legacy, seahorse, or all")
+	runCmd.Flags().StringVar(&flagMode, "mode", "all", "modes to run: legacy, seahorse, honcho, all, or all+ (all incl. honcho)")
 	runCmd.Flags().IntVar(&flagBudget, "budget", 4000, "token budget for retrieval")
 	runCmd.Flags().
 		StringVar(&flagEvalMode, "eval-mode", "token", "evaluation mode: token (direct match) or llm (LLM-as-Judge)")
@@ -111,8 +122,7 @@ func main() {
 	runCmd.Flags().StringVar(&flagJudgeAPIKey, "judge-api-key", "", "API key for judge model (defaults to --api-key)")
 	runCmd.Flags().IntVar(&flagConcurrency, "concurrency", 1, "number of concurrent QA evaluations")
 
-	rootCmd.AddCommand(ingestCmd, evalCmd, reportCmd, runCmd)
-
+	rootCmd.AddCommand(ingestCmd, evalCmd, reportCmd, runCmd, compressCmd)
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
@@ -122,6 +132,8 @@ func modesFromFlag() []string {
 	switch strings.ToLower(flagMode) {
 	case "all":
 		return []string{"legacy", "seahorse"}
+	case "all+":
+		return []string{"legacy", "seahorse", "honcho"}
 	default:
 		return []string{strings.ToLower(flagMode)}
 	}
@@ -159,6 +171,14 @@ func runIngest(cmd *cobra.Command, args []string) error {
 			_, err := IngestSeahorse(ctx, samples, dbPath)
 			if err != nil {
 				return fmt.Errorf("ingest seahorse: %w", err)
+			}
+		case "honcho":
+			ir, err := IngestHoncho(ctx, samples)
+			if err != nil {
+				return fmt.Errorf("ingest honcho: %w", err)
+			}
+			if ir.MockServer != nil {
+				ir.MockServer.Close()
 			}
 		}
 	}
@@ -257,6 +277,23 @@ func runEval(cmd *cobra.Command, args []string) error {
 				tokenResults = append(tokenResults, results...)
 				log.Printf("seahorse: evaluated %d samples", len(results))
 			}
+		case "honcho":
+			ir, err := IngestHoncho(ctx, samples)
+			if err != nil {
+				return fmt.Errorf("ingest honcho: %w", err)
+			}
+			if useLLM {
+				results := EvalHonchoLLM(ctx, samples, ir, flagBudget, answerClient, judgeClient, flagConcurrency)
+				llmResults = append(llmResults, results...)
+				log.Printf("honcho-llm: evaluated %d samples", len(results))
+			} else {
+				results := EvalHoncho(ctx, samples, ir, flagBudget)
+				tokenResults = append(tokenResults, results...)
+				log.Printf("honcho: evaluated %d samples", len(results))
+			}
+			if ir.MockServer != nil {
+				ir.MockServer.Close()
+			}
 		}
 	}
 
@@ -269,6 +306,41 @@ func runEval(cmd *cobra.Command, args []string) error {
 	}
 
 	PrintComparison(tokenResults, llmResults)
+	return nil
+}
+
+func runCompress(cmd *cobra.Command, args []string) error {
+	if flagData == "" {
+		return fmt.Errorf("--data is required")
+	}
+	ctx := context.Background()
+	samples, err := LoadDataset(flagData)
+	if err != nil {
+		return fmt.Errorf("load dataset: %w", err)
+	}
+	log.Printf("Loaded %d samples", len(samples))
+
+	if flagLimit > 0 {
+		for i := range samples {
+			if len(samples[i].QA) > flagLimit {
+				samples[i].QA = samples[i].QA[:flagLimit]
+			}
+		}
+		log.Printf("Limited to %d QA per sample", flagLimit)
+	}
+
+	rows, err := RunCompressCycles(ctx, samples, flagOut, flagBudget)
+	if err != nil {
+		return fmt.Errorf("compress cycles: %w", err)
+	}
+	if err := SaveCompressResults(rows, flagOut); err != nil {
+		return fmt.Errorf("save compress results: %w", err)
+	}
+	if err := SaveCompressMarkdown(rows, flagOut); err != nil {
+		return fmt.Errorf("save compress markdown: %w", err)
+	}
+	PrintCompressScorecard(rows)
+	log.Printf("compress scorecard written to %s", flagOut)
 	return nil
 }
 
