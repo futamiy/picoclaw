@@ -186,7 +186,7 @@ func (cb *ContextBuilder) getIdentity(includeToolUseRule bool) string {
 	}
 
 	return fmt.Sprintf(
-		`# picoclaw 🦞 (%s)
+		`# picoclaw (%s)
 
 You are picoclaw, a helpful AI assistant.
 

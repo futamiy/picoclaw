@@ -69,5 +69,15 @@
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.62.1",
     "vite": "^8.0.16"
+  },
+  "pnpm": {
+    "overrides": {
+      "postcss-selector-parser": ">=7.1.6"
+    },
+    "auditConfig": {
+      "ignoreGhsas": [
+        "GHSA-vfj7-8cjw-p6xm"
+      ]
+    }
   }
 }

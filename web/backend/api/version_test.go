@@ -40,7 +40,7 @@ func TestGetSystemVersionUsesPicoclawBinaryInfo(t *testing.T) {
 
 	findPicoclawBinaryForInfo = func() string { return "picoclaw" }
 	runPicoclawVersionOutput = func(_ context.Context, _ string) (string, error) {
-		return "🦞 picoclaw v1.2.3 (git: deadbeef)\n  Build: 2026-03-27T12:34:56Z\n  Go: go1.25.8\n", nil
+		return "picoclaw v1.2.3 (git: deadbeef)\n  Build: 2026-03-27T12:34:56Z\n  Go: go1.25.8\n", nil
 	}
 
 	h := NewHandler("")
@@ -124,7 +124,7 @@ func TestGetSystemVersionFallsBackToLauncherInfoWhenCommandFails(t *testing.T) {
 func TestParsePicoclawVersionOutput(t *testing.T) {
 	setupVersionTestIsolation(t)
 
-	raw := "\u001b[1;31m████\u001b[0m\n🦞 picoclaw 18ec263 (git: 18ec2631)\n  Build: 2026-03-27T10:43:34+0000\n  Go: go1.25.8\n"
+	raw := "\u001b[1;31m████\u001b[0m\npicoclaw 18ec263 (git: 18ec2631)\n  Build: 2026-03-27T10:43:34+0000\n  Go: go1.25.8\n"
 	got, ok := parsePicoclawVersionOutput(raw)
 	if !ok {
 		t.Fatal("parsePicoclawVersionOutput() should parse valid output")
