@@ -920,6 +920,8 @@
       "summarize_threshold_hint": "Start summarization after this many messages.",
       "summarize_token_percent": "Summarize Token Percent",
       "summarize_token_percent_hint": "Used when conversation summary is triggered.",
+      "auto_compress": "Auto-compress context (experimental)",
+      "auto_compress_hint": "When the estimated token count would exceed the context window, PicoClaw silently compresses history and continues. Disable to surface the context-limit error instead.",
       "turn_profile": "Request Context Policy",
       "turn_profile_hint": "Controls what context each request carries. Leave disabled to keep the normal chat behavior.",
       "turn_profile_enabled": "Enable policy",

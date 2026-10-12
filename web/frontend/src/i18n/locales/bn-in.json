@@ -919,6 +919,8 @@
       "summarize_threshold_hint": "এই সংখ্যক বার্তার পরে সংক্ষিপ্তসার শুরু করুন।",
       "summarize_token_percent": "সংক্ষিপ্তসারের টোকেন শতাংশ",
       "summarize_token_percent_hint": "কথোপকথন সংক্ষিপ্তসার ট্রিগার হলে ব্যবহৃত।",
+      "auto_compress": "Auto-compress context (experimental)",
+      "auto_compress_hint": "When the estimated token count would exceed the context window, PicoClaw silently compresses history and continues. Disable to surface the context-limit error instead.",
       "turn_profile": "অনুরোধ প্রসঙ্গ নীতি",
       "turn_profile_hint": "প্রতিটি অনুরোধে কী প্রসঙ্গ বহন করে তা নিয়ন্ত্রণ করে। স্বাভাবিক চ্যাট আচরণ রাখতে নিষ্ক্রিয় রাখুন।",
       "turn_profile_enabled": "নীতি সক্ষম করুন",

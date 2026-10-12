@@ -12,6 +12,9 @@ import (
 	"github.com/sipeed/picoclaw/pkg"
 )
 
+// boolPtr returns a pointer to v. Used for tri-state (unset) optional bools.
+func boolPtr(v bool) *bool { return &v }
+
 // DefaultConfig returns the default configuration for PicoClaw.
 func DefaultConfig() *Config {
 	workspacePath := filepath.Join(GetHome(), pkg.WorkspaceName)
@@ -42,6 +45,9 @@ func DefaultConfig() *Config {
 				SplitOnMarker:       false,
 				MaxLLMRetries:       2,
 				LLMRetryBackoffSecs: 2,
+				Experimental: ExperimentalConfig{
+					AutoCompress: boolPtr(true),
+				},
 				Memory: MemoryConfig{
 					Enabled:            true,
 					Provider:           MemoryProviderLocal,

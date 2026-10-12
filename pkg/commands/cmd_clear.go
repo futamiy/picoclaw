@@ -14,7 +14,7 @@ func clearCommand() Definition {
 			if err := rt.ClearHistory(); err != nil {
 				return req.Reply("Failed to clear chat history: " + err.Error())
 			}
-			return req.Reply("Chat history cleared!")
+			return req.Reply("Chat history cleared! Memory and context summary retained.")
 		},
 	}
 }

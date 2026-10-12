@@ -920,6 +920,8 @@
       "summarize_threshold_hint": "Iniciar resumo após este número de mensagens.",
       "summarize_token_percent": "Percentual de Token para Resumir",
       "summarize_token_percent_hint": "Usado quando o resumo da conversa é acionado.",
+      "auto_compress": "Auto-compress context (experimental)",
+      "auto_compress_hint": "When the estimated token count would exceed the context window, PicoClaw silently compresses history and continues. Disable to surface the context-limit error instead.",
       "turn_profile": "Política de Contexto da Requisição",
       "turn_profile_hint": "Controla qual contexto cada requisição carrega. Deixe desativado para manter o comportamento normal do chat.",
       "turn_profile_enabled": "Ativar política",

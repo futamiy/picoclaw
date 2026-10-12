@@ -918,6 +918,8 @@
       "summarize_threshold_hint": "Spustit sumarizaci po tomto počtu zpráv.",
       "summarize_token_percent": "Procento tokenů pro sumarizaci",
       "summarize_token_percent_hint": "Používá se při spuštění sumarizace konverzace.",
+      "auto_compress": "Auto-compress context (experimental)",
+      "auto_compress_hint": "When the estimated token count would exceed the context window, PicoClaw silently compresses history and continues. Disable to surface the context-limit error instead.",
       "turn_profile": "Zásady kontextu požadavku",
       "turn_profile_hint": "Řídí, jaký kontext nese každý požadavek. Ponechte zakázáno pro zachování běžného chování chatu.",
       "turn_profile_enabled": "Povolit zásadu",

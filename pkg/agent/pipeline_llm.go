@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/picoclaw/pkg/constants"
 	runtimeevents "github.com/sipeed/picoclaw/pkg/events"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/providers"
@@ -366,7 +365,7 @@ func (p *Pipeline) CallLLM(
 			continue
 		}
 
-		if isContextError && retry < maxRetries && !ts.opts.NoHistory {
+		if isContextError && retry < maxRetries && !ts.opts.NoHistory && p.Cfg.Agents.Defaults.EffectiveAutoCompress() {
 			al.emitEvent(
 				runtimeevents.KindAgentLLMRetry,
 				ts.eventMeta("runTurn", "turn.llm.retry"),
@@ -386,12 +385,9 @@ func (p *Pipeline) CallLLM(
 				},
 			)
 
-			if retry == 0 && !constants.IsInternalChannel(ts.channel) {
-				al.bus.PublishOutbound(ctx, outboundMessageForTurn(
-					ts,
-					"Context window exceeded. Compressing history and retrying...",
-				))
-			}
+			// Transparent compaction: compress and retry silently, mirroring
+			// opencode. No user-facing "compressing..." notice is emitted; the
+			// retry is observable only via the KindAgentLLMRetry event/logs.
 
 			if compactErr := p.ContextManager.Compact(ctx, &CompactRequest{
 				SessionKey: ts.sessionKey,

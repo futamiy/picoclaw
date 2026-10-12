@@ -592,6 +592,9 @@ export function ConfigPage() {
               max_tool_iterations: maxToolIterations,
               summarize_message_threshold: summarizeMessageThreshold,
               summarize_token_percent: summarizeTokenPercent,
+              experimental: {
+                auto_compress: form.autoCompress,
+              },
               turn_profile: turnProfile,
             },
           },

@@ -920,6 +920,8 @@
       "summarize_threshold_hint": "消息数量达到该值后开始触发摘要",
       "summarize_token_percent": "摘要目标 Token 百分比",
       "summarize_token_percent_hint": "在触发会话摘要时使用",
+      "auto_compress": "自动压缩上下文（实验性）",
+      "auto_compress_hint": "当预估 Token 数将超出上下文窗口时，PicoClaw 会静默压缩历史并继续。关闭后将改为直接暴露上下文超限错误。",
       "turn_profile": "请求上下文策略",
       "turn_profile_hint": "控制每次请求会带入哪些上下文。保持关闭时，普通对话完全沿用原逻辑。",
       "turn_profile_enabled": "启用策略",

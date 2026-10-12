@@ -20,6 +20,7 @@ export interface CoreConfigForm {
   maxToolIterations: string
   summarizeMessageThreshold: string
   summarizeTokenPercent: string
+  autoCompress: boolean
   turnProfile: TurnProfileForm
   dmScope: string
   heartbeatEnabled: boolean
@@ -131,6 +132,7 @@ export const EMPTY_FORM: CoreConfigForm = {
   maxToolIterations: "50",
   summarizeMessageThreshold: "20",
   summarizeTokenPercent: "75",
+  autoCompress: true,
   turnProfile: {
     enabled: false,
     historyMode: "default",
@@ -302,6 +304,7 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
   const cron = asRecord(tools.cron)
   const exec = asRecord(tools.exec)
   const toolFeedback = asRecord(defaults.tool_feedback)
+  const experimental = asRecord(defaults.experimental)
 
   return {
     workspace: asString(defaults.workspace) || EMPTY_FORM.workspace,
@@ -376,6 +379,10 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
       defaults.summarize_token_percent,
       EMPTY_FORM.summarizeTokenPercent,
     ),
+    autoCompress:
+      experimental.auto_compress === undefined
+        ? EMPTY_FORM.autoCompress
+        : asBool(experimental.auto_compress),
     turnProfile: mapTurnProfile(defaults.turn_profile),
     dmScope: asString(session.dm_scope) || EMPTY_FORM.dmScope,
     heartbeatEnabled:

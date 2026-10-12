@@ -254,6 +254,14 @@ export function AgentDefaultsSection({
         />
       </Field>
 
+      <SwitchCardField
+        label={t("pages.config.auto_compress")}
+        hint={t("pages.config.auto_compress_hint")}
+        layout="setting-row"
+        checked={form.autoCompress}
+        onCheckedChange={(checked) => onFieldChange("autoCompress", checked)}
+      />
+
       <Field
         label={t("pages.config.turn_profile")}
         hint={t("pages.config.turn_profile_hint")}

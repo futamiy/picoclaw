@@ -775,6 +775,18 @@ type AgentDefaults struct {
 	MaxLLMRetries             int                `json:"max_llm_retries,omitempty"        env:"PICOCLAW_AGENTS_DEFAULTS_MAX_LLM_RETRIES"`
 	LLMRetryBackoffSecs       int                `json:"llm_retry_backoff_secs,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_LLM_RETRY_BACKOFF_SECS"`
 	Memory                    MemoryConfig       `json:"memory,omitempty"`
+	Experimental              ExperimentalConfig `json:"experimental,omitempty"`
+}
+
+// ExperimentalConfig groups opt-in, behavior-changing settings. These are
+// intentionally separated from stable config so their semantics can evolve.
+type ExperimentalConfig struct {
+	// AutoCompress enables transparent, opencode-style context compaction:
+	// when the estimated token count would exceed the model's context window,
+	// the runtime pauses, compresses/trims history, and continues without
+	// surfacing an error or a "compressing..." notice to the user. A nil value
+	// preserves the default (enabled).
+	AutoCompress *bool `json:"auto_compress,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_EXPERIMENTAL_AUTO_COMPRESS"`
 }
 
 const DefaultMaxMediaSize = 20 * 1024 * 1024 // 20 MB
@@ -810,6 +822,17 @@ func (d *AgentDefaults) IsToolFeedbackSeparateMessagesEnabled() bool {
 // It prefers the new "model_name" field but falls back to "model" for backward compatibility.
 func (d *AgentDefaults) GetModelName() string {
 	return d.ModelName
+}
+
+// EffectiveAutoCompress reports whether transparent context auto-compression is
+// enabled. It defaults to true so existing installations keep their current
+// silky pre-call compaction behavior; setting experimental.auto_compress=false
+// disables it.
+func (d *AgentDefaults) EffectiveAutoCompress() bool {
+	if d.Experimental.AutoCompress == nil {
+		return true
+	}
+	return *d.Experimental.AutoCompress
 }
 
 // GroupTriggerConfig controls when the bot responds in group chats.
