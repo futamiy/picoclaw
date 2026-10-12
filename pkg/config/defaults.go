@@ -44,6 +44,7 @@ func DefaultConfig() *Config {
 				LLMRetryBackoffSecs: 2,
 				Memory: MemoryConfig{
 					Enabled:            true,
+					Provider:           MemoryProviderLocal,
 					LongTermCharLimit:  DefaultMemoryLongTermCharLimit,
 					DailyNotesEnabled:  true,
 					DailyNotesDays:     DefaultMemoryDailyNotesDays,
@@ -55,6 +56,14 @@ func DefaultConfig() *Config {
 						BaseURL:        DefaultHonchoBaseURL,
 						UserPeerID:     DefaultHonchoUserPeerID,
 						Trigger:        HonchoTriggerAsk,
+						SyncEveryTurns: DefaultMemorySyncEveryTurns,
+					}, Mem0: Mem0MemoryConfig{
+						Enabled:        false,
+						BaseURL:        DefaultMem0BaseURL,
+						SyncEveryTurns: DefaultMemorySyncEveryTurns,
+					},
+					RetainDB: RetainDBMemoryConfig{
+						Enabled:        false,
 						SyncEveryTurns: DefaultMemorySyncEveryTurns,
 					},
 				},

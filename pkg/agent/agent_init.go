@@ -403,6 +403,14 @@ func registerSharedTools(
 			agent.Tools.Register(delegateTool)
 		}
 
+		// Inject the runtime event bus into the Honcho tool (when registered)
+		// so its reasoning calls surface as runtime events.
+		if t, ok := agent.Tools.Get("honcho"); ok {
+			if pub, ok := t.(interface{ SetEventPublisher(runtimeevents.Bus) }); ok {
+				pub.SetEventPublisher(al.runtimeEvents)
+			}
+		}
+
 		warnOnUnknownAgentToolDeclarations(agentID, agent.Workspace, agent.Definition, agent.Tools)
 	}
 }

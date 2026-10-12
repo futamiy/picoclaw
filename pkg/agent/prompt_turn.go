@@ -8,6 +8,18 @@ import (
 	"github.com/sipeed/picoclaw/pkg/providers"
 )
 
+// recallHonchoContext returns the prefetched Honcho memory block for a session
+// when the agent's memory syncer supports recall. It returns "" otherwise.
+func recallHonchoContext(agent *AgentInstance, sessionKey string) string {
+	if agent == nil || agent.MemorySync == nil || sessionKey == "" {
+		return ""
+	}
+	if r, ok := agent.MemorySync.(memoryRecaller); ok {
+		return r.RecallContext(sessionKey)
+	}
+	return ""
+}
+
 func promptBuildRequestForTurn(
 	ts *turnState,
 	history []providers.Message,
@@ -28,6 +40,7 @@ func promptBuildRequestForTurn(
 		ActiveSkills:      activeSkillNames(ts.agent, ts.opts),
 		Overlays:          promptOverlaysForOptions(ts.opts),
 	}
+	req.HonchoContext = recallHonchoContext(ts.agent, ts.opts.Dispatch.SessionKey)
 	hasCallableTools := true
 	if ts.profile.Enabled {
 		hasCallableTools = turnProfileHasCallableTools(ts.profile, ts.agent.Tools.ToProviderDefs()) ||
@@ -91,6 +104,7 @@ func promptBuildRequestForProcessOptions(
 		ActiveSkills:      activeSkillNames(agent, opts),
 		Overlays:          promptOverlaysForOptions(opts),
 	}
+	req.HonchoContext = recallHonchoContext(agent, opts.SessionKey)
 	profile := opts.TurnProfile
 	hasCallableTools := true
 	if profile.Enabled && agent != nil {

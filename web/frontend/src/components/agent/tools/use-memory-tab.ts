@@ -5,11 +5,12 @@ import { toast } from "sonner"
 
 import {
   type MemoryConfigResponse,
+  type MemoryProvider,
   approveHoncho,
   dismissHoncho,
   getHonchoPending,
   getMemoryConfig,
-  testHoncho,
+  testMemoryProvider,
   updateMemoryConfig,
 } from "@/api/tools"
 import { showSaveSuccessOrRestartToast } from "@/lib/restart-required"
@@ -131,12 +132,14 @@ export function useMemoryTab() {
 
   const testMutation = useMutation({
     mutationFn: ({
+      provider,
       baseUrl,
       apiKey,
     }: {
+      provider: MemoryProvider
       baseUrl?: string
       apiKey?: string
-    }) => testHoncho(baseUrl, apiKey),
+    }) => testMemoryProvider(provider, baseUrl, apiKey),
     onSuccess: (result) => {
       if (result.ok) {
         toast.success(
@@ -188,8 +191,11 @@ export function useMemoryTab() {
     isDismissing: dismissMutation.isPending,
     updateDraft,
     save,
-    testConnection: (baseUrl?: string, apiKey?: string) =>
-      testMutation.mutate({ baseUrl, apiKey }),
+    testConnection: (
+      provider: MemoryProvider,
+      baseUrl?: string,
+      apiKey?: string,
+    ) => testMutation.mutate({ provider, baseUrl, apiKey }),
     approve: (agentId: string, sessionKey: string) =>
       approveMutation.mutate({ agentId, sessionKey }),
     dismiss: (agentId: string, sessionKey: string) =>

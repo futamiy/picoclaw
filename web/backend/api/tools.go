@@ -209,6 +209,7 @@ func (h *Handler) registerToolRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tools/memory/honcho/approve", h.handleApproveHoncho)
 	mux.HandleFunc("POST /api/tools/memory/honcho/dismiss", h.handleDismissHoncho)
 	mux.HandleFunc("POST /api/tools/memory/honcho/test", h.handleTestHoncho)
+	mux.HandleFunc("POST /api/tools/memory/test", h.handleTestMemoryProvider)
 }
 
 func (h *Handler) handleListTools(w http.ResponseWriter, r *http.Request) {

@@ -963,6 +963,23 @@ func (cb *ContextBuilder) BuildMessagesFromPrompt(req PromptBuildRequest) []prov
 			stringParts = append(stringParts, summaryPart.Content)
 			contentBlocks = append(contentBlocks, promptContentBlock(summaryPart, nil))
 		}
+
+		if hc := strings.TrimSpace(req.HonchoContext); hc != "" {
+			honchoPart := PromptPart{
+				ID:     "context.honcho",
+				Layer:  PromptLayerContext,
+				Slot:   PromptSlotHoncho,
+				Source: PromptSource{ID: PromptSourceHoncho, Name: "context.honcho"},
+				Title:  "honcho memory",
+				Content: "HONCHO_MEMORY: The following background memory was recalled from the " +
+					"Honcho memory service for this session. It may be incomplete or outdated — " +
+					"always defer to explicit instructions and the current conversation.\n\n" + hc,
+				Stable: false,
+				Cache:  PromptCacheNone,
+			}
+			stringParts = append(stringParts, honchoPart.Content)
+			contentBlocks = append(contentBlocks, promptContentBlock(honchoPart, nil))
+		}
 	}
 
 	if len(stringParts) == 0 && req.ToolUseFallback {

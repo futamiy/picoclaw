@@ -6,7 +6,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 
 import { HonchoPendingCard } from "./honcho-pending-card"
 import { HonchoSettings } from "./honcho-settings"
+import { Mem0Settings } from "./mem0-settings"
+import { MemoryProviderPicker } from "./memory-provider-picker"
 import { MemorySettings } from "./memory-settings"
+import { RetainDBSettings } from "./retaindb-settings"
 import { useMemoryTab } from "./use-memory-tab"
 
 export function MemoryTab() {
@@ -77,29 +80,85 @@ export function MemoryTab() {
           )}
 
           <div className="space-y-10">
-            <HonchoPendingCard
-              items={pending}
-              isBusy={isApproving || isDismissing}
-              onApprove={approve}
-              onDismiss={dismiss}
+            <MemoryProviderPicker
+              value={draft.provider}
+              onChange={(provider) =>
+                updateDraft((current) => ({ ...current, provider }))
+              }
             />
 
-            <HonchoSettings
-              draft={draft.honcho}
-              onUpdate={(partial) =>
-                updateDraft((current) => ({
-                  ...current,
-                  honcho: { ...current.honcho, ...partial },
-                }))
-              }
-              onTest={() =>
-                testConnection(
-                  draft.honcho.base_url,
-                  draft.honcho.api_key_set ? undefined : draft.honcho.api_key,
-                )
-              }
-              isTesting={isTesting}
-            />
+            {draft.provider === "honcho" && (
+              <>
+                <HonchoPendingCard
+                  items={pending}
+                  isBusy={isApproving || isDismissing}
+                  onApprove={approve}
+                  onDismiss={dismiss}
+                />
+
+                <HonchoSettings
+                  draft={draft.honcho}
+                  onUpdate={(partial) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      honcho: { ...current.honcho, ...partial },
+                    }))
+                  }
+                  onTest={() =>
+                    testConnection(
+                      "honcho",
+                      draft.honcho.base_url,
+                      draft.honcho.api_key_set
+                        ? undefined
+                        : draft.honcho.api_key,
+                    )
+                  }
+                  isTesting={isTesting}
+                />
+              </>
+            )}
+
+            {draft.provider === "mem0" && (
+              <Mem0Settings
+                draft={draft.mem0}
+                onUpdate={(partial) =>
+                  updateDraft((current) => ({
+                    ...current,
+                    mem0: { ...current.mem0, ...partial },
+                  }))
+                }
+                onTest={() =>
+                  testConnection(
+                    "mem0",
+                    draft.mem0.base_url,
+                    draft.mem0.api_key_set ? undefined : draft.mem0.api_key,
+                  )
+                }
+                isTesting={isTesting}
+              />
+            )}
+
+            {draft.provider === "retaindb" && (
+              <RetainDBSettings
+                draft={draft.retaindb}
+                onUpdate={(partial) =>
+                  updateDraft((current) => ({
+                    ...current,
+                    retaindb: { ...current.retaindb, ...partial },
+                  }))
+                }
+                onTest={() =>
+                  testConnection(
+                    "retaindb",
+                    draft.retaindb.base_url,
+                    draft.retaindb.api_key_set
+                      ? undefined
+                      : draft.retaindb.api_key,
+                  )
+                }
+                isTesting={isTesting}
+              />
+            )}
 
             <MemorySettings draft={draft} onUpdateDraft={updateDraft} />
           </div>

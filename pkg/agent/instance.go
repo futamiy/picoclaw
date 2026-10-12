@@ -14,11 +14,14 @@ import (
 	"github.com/sipeed/picoclaw/pkg/isolation"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/media"
+	"github.com/sipeed/picoclaw/pkg/mem0"
 	"github.com/sipeed/picoclaw/pkg/memory"
 	"github.com/sipeed/picoclaw/pkg/providers"
+	"github.com/sipeed/picoclaw/pkg/retaindb"
 	"github.com/sipeed/picoclaw/pkg/routing"
 	"github.com/sipeed/picoclaw/pkg/session"
 	"github.com/sipeed/picoclaw/pkg/tools"
+	honchotool "github.com/sipeed/picoclaw/pkg/tools/honcho"
 	memorytool "github.com/sipeed/picoclaw/pkg/tools/memory"
 )
 
@@ -63,9 +66,10 @@ type AgentInstance struct {
 	// Memory drives the async long-term memory extraction pipeline.
 	// Nil when memory extraction is disabled.
 	Memory *MemoryManager
-	// Honcho drives optional sync of conversation transcripts to a Honcho server.
-	// Nil when Honcho sync is disabled.
-	Honcho *HonchoSyncer
+	// MemorySync drives optional sync of conversation transcripts to an
+	// external memory provider (Honcho, Mem0, RetainDB). Nil when disabled or
+	// when the provider is "local".
+	MemorySync memorySync
 	// CandidateProviders maps candidate identity keys to per-candidate LLMProvider
 	// instances. Config-index keys preserve duplicate model_list entries while
 	// provider/model keys remain available for callers without a config identity.
@@ -190,7 +194,6 @@ func NewAgentInstance(
 	if cfg.Agents.Defaults.Memory.Enabled && cfg.Tools.IsToolEnabled("memory") {
 		toolsRegistry.Register(memorytool.NewMemoryTool(contextBuilder.Memory()))
 	}
-
 	agentID := routing.DefaultAgentID
 	agentName := ""
 	var subagents *config.SubagentsConfig
@@ -383,18 +386,74 @@ func NewAgentInstance(
 		)
 	}
 
-	if memCfg.Enabled && memCfg.Honcho.Enabled {
-		instance.Honcho = newHonchoSyncer(
-			instance,
-			honcho.New(memCfg.Honcho.EffectiveBaseURL(), memCfg.Honcho.APIKey),
-			honchoConfig{
-				WorkspaceID: memCfg.Honcho.WorkspaceID,
-				UserPeerID:  memCfg.Honcho.EffectiveUserPeerID(),
-				TriggerAuto: !memCfg.Honcho.AskFirst(),
-				EveryTurns:  memCfg.Honcho.EffectiveSyncEveryTurns(),
-			},
-			cfg.FilterSensitiveData,
-		)
+	if memCfg.Enabled {
+		switch memCfg.EffectiveMemoryProvider() {
+		case config.MemoryProviderHoncho:
+			instance.MemorySync = newHonchoSyncer(
+				instance,
+				honcho.New(memCfg.Honcho.EffectiveBaseURL(), memCfg.Honcho.APIKey),
+				honchoConfig{
+					WorkspaceID:      memCfg.Honcho.WorkspaceID,
+					UserPeerID:       memCfg.Honcho.EffectiveUserPeerID(),
+					AgentPeerID:      memCfg.Honcho.AgentPeerID,
+					TriggerAuto:      !memCfg.Honcho.AskFirst(),
+					EveryTurns:       memCfg.Honcho.EffectiveSyncEveryTurns(),
+					RecallEnabled:    memCfg.Honcho.InjectsContext(),
+					ContextCadence:   memCfg.Honcho.EffectiveContextCadence(),
+					DialecticCadence: memCfg.Honcho.EffectiveDialecticCadence(),
+					DialecticLevel:   memCfg.Honcho.EffectiveDialecticLevel(),
+					ContextTokens:    memCfg.Honcho.EffectiveContextTokens(),
+				},
+				cfg.FilterSensitiveData,
+			)
+		case config.MemoryProviderMem0:
+			agentID := memCfg.Mem0.AgentID
+			if agentID == "" {
+				agentID = instance.ID
+			}
+			instance.MemorySync = newMemorySyncer(
+				instance,
+				&mem0Sink{
+					client:  mem0.New(memCfg.Mem0.EffectiveBaseURL(), memCfg.Mem0.APIKey),
+					userID:  memCfg.Mem0.UserID,
+					agentID: agentID,
+				},
+				memCfg.Mem0.EffectiveSyncEveryTurns(),
+				cfg.FilterSensitiveData,
+			)
+		case config.MemoryProviderRetainDB:
+			namespace := memCfg.RetainDB.Namespace
+			if namespace == "" {
+				namespace = instance.ID
+			}
+			instance.MemorySync = newMemorySyncer(
+				instance,
+				&retainDBSink{
+					client: retaindb.New(memCfg.RetainDB.EffectiveBaseURL(), memCfg.RetainDB.APIKey, namespace),
+				},
+				memCfg.RetainDB.EffectiveSyncEveryTurns(),
+				cfg.FilterSensitiveData,
+			)
+		}
+
+		// Expose Honcho read/reasoning tools when the recall mode includes tools.
+		if memCfg.EffectiveMemoryProvider() == config.MemoryProviderHoncho && memCfg.Honcho.ExposesTools() {
+			workspaceID := strings.TrimSpace(memCfg.Honcho.WorkspaceID)
+			if workspaceID == "" {
+				workspaceID = instance.ID
+			}
+			agentPeer := strings.TrimSpace(memCfg.Honcho.AgentPeerID)
+			if agentPeer == "" {
+				agentPeer = instance.ID
+			}
+			toolsRegistry.Register(honchotool.NewTool(honchotool.Config{
+				Client:             honcho.New(memCfg.Honcho.EffectiveBaseURL(), memCfg.Honcho.APIKey),
+				WorkspaceID:        workspaceID,
+				UserPeerID:         memCfg.Honcho.EffectiveUserPeerID(),
+				AgentPeerID:        agentPeer,
+				DefaultDialectical: memCfg.Honcho.EffectiveDialecticLevel(),
+			}))
+		}
 	}
 
 	return instance

@@ -82,8 +82,8 @@ func (p *Pipeline) Finalize(
 	}
 
 	// Optional Honcho transcript sync, gated by its own turn cadence.
-	if hs := ts.agent.Honcho; hs != nil {
-		hs.MaybeSyncHoncho(al, ts.sessionKey)
+	if hs := ts.agent.MemorySync; hs != nil {
+		hs.MaybeSync(al, ts.sessionKey)
 	}
 
 	contextUsage := computeContextUsage(ts.agent, ts.sessionKey)

@@ -32,6 +32,7 @@ const (
 	PromptSlotSkillCatalog PromptSlot = "skill_catalog"
 	PromptSlotActiveSkill  PromptSlot = "active_skill"
 	PromptSlotMemory       PromptSlot = "memory"
+	PromptSlotHoncho       PromptSlot = "honcho_memory"
 	PromptSlotRuntime      PromptSlot = "runtime"
 	PromptSlotSummary      PromptSlot = "summary"
 	PromptSlotMessage      PromptSlot = "message"
@@ -51,6 +52,7 @@ const (
 	PromptSourceRuntime        PromptSourceID = "runtime.context"
 	PromptSourceSummary        PromptSourceID = "context.summary"
 	PromptSourceMemory         PromptSourceID = "memory:workspace"
+	PromptSourceHoncho         PromptSourceID = "memory:honcho"
 	PromptSourceSkillCatalog   PromptSourceID = "skill:index"
 	PromptSourceActiveSkills   PromptSourceID = "skill:active"
 	PromptSourceAgentDiscovery PromptSourceID = "agent:discovery"
@@ -106,6 +108,10 @@ type PromptPart struct {
 type PromptBuildRequest struct {
 	History []providers.Message
 	Summary string
+
+	// HonchoContext is an optional, per-turn block of memory prefetched from
+	// the Honcho provider. It is injected as dynamic (uncached) context.
+	HonchoContext string
 
 	CurrentMessage string
 	Media          []string
@@ -218,6 +224,13 @@ func builtinPromptSources() []PromptSourceDescriptor {
 			Description:     "Workspace memory context",
 			Allowed:         []PromptPlacement{{Layer: PromptLayerContext, Slot: PromptSlotMemory}},
 			StableByDefault: true,
+		},
+		{
+			ID:              PromptSourceHoncho,
+			Owner:           "memory",
+			Description:     "Prefetched Honcho memory context",
+			Allowed:         []PromptPlacement{{Layer: PromptLayerContext, Slot: PromptSlotHoncho}},
+			StableByDefault: false,
 		},
 		{
 			ID:              PromptSourceRuntime,
@@ -493,6 +506,8 @@ func slotPriority(slot PromptSlot) int {
 		return 770
 	case PromptSlotMemory:
 		return 700
+	case PromptSlotHoncho:
+		return 698
 	case PromptSlotOutput:
 		return 695
 	case PromptSlotRuntime:

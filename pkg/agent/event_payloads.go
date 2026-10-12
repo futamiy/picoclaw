@@ -142,6 +142,15 @@ type HonchoAwaitingApprovalPayload struct {
 	WorkspaceID  string
 }
 
+// HonchoPrefetchedPayload describes a background recall that refreshed the
+// cached Honcho memory block for a session.
+type HonchoPrefetchedPayload struct {
+	SessionKey  string
+	AgentID     string
+	WorkspaceID string
+	Chars       int
+}
+
 // ToolExecStartPayload describes a tool execution request.
 type ToolExecStartPayload struct {
 	Tool      string

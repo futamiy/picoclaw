@@ -426,6 +426,10 @@ type ToolFeedbackConfig struct {
 type MemoryConfig struct {
 	// Enabled controls whether the `memory` tool is registered and memory is injected.
 	Enabled bool `json:"enabled" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_ENABLED"`
+	// Provider selects the external memory backend: "local" (built-in only),
+	// "honcho", "mem0" or "retaindb". Empty behaves as "local" unless a legacy
+	// Honcho config is enabled.
+	Provider string `json:"provider,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_PROVIDER"`
 	// LongTermCharLimit caps MEMORY.md size; writes that exceed it are rejected
 	// so the agent must condense first.
 	LongTermCharLimit int `json:"long_term_char_limit" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_LONG_TERM_CHAR_LIMIT"`
@@ -445,6 +449,10 @@ type MemoryConfig struct {
 	// pushed to a Honcho (https://honcho.dev) workspace where it reasons over
 	// them in the background to build peer representations.
 	Honcho HonchoMemoryConfig `json:"honcho,omitempty"`
+	// Mem0 is an optional external memory sink backed by a Mem0 server.
+	Mem0 Mem0MemoryConfig `json:"mem0,omitempty"`
+	// RetainDB is an optional external memory sink backed by a RetainDB server.
+	RetainDB RetainDBMemoryConfig `json:"retaindb,omitempty"`
 }
 
 // HonchoMemoryConfig configures pushing conversation transcripts to a Honcho
@@ -465,6 +473,56 @@ type HonchoMemoryConfig struct {
 	Trigger string `json:"trigger,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_HONCHO_TRIGGER"`
 	// SyncEveryTurns syncs once every N completed turns (min 1). 0 uses the default.
 	SyncEveryTurns int `json:"sync_every_turns,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_HONCHO_SYNC_EVERY_TURNS"`
+	// RecallMode controls how the agent reads memory back from Honcho:
+	// "hybrid" injects context and exposes tools, "context" injects only,
+	// "tools" exposes only, "off" disables recall entirely.
+	RecallMode string `json:"recall_mode,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_HONCHO_RECALL_MODE"`
+	// AgentPeerID is the Honcho peer representing this agent. Empty uses the agent ID.
+	AgentPeerID string `json:"agent_peer_id,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_HONCHO_AGENT_PEER_ID"`
+	// ContextCadence is the minimum number of turns between context prefetch
+	// calls (min 1). Higher values reduce API calls. 0 uses the default.
+	ContextCadence int `json:"context_cadence,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_HONCHO_CONTEXT_CADENCE"`
+	// DialecticCadence is the minimum number of turns between dialectic
+	// (reasoning) calls (min 1). 0 uses the default.
+	DialecticCadence int `json:"dialectic_cadence,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_HONCHO_DIALECTIC_CADENCE"`
+	// DialecticLevel is the default reasoning level for dialectic calls:
+	// minimal, low, medium, high, or max. Empty uses the default.
+	DialecticLevel string `json:"dialectic_level,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_HONCHO_DIALECTIC_LEVEL"`
+	// ContextTokens bounds the combined injected memory-context block
+	// (summary + representation + card). 0 leaves it uncapped.
+	ContextTokens int `json:"context_tokens,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_HONCHO_CONTEXT_TOKENS"`
+}
+
+// Mem0MemoryConfig configures pushing conversation transcripts to a Mem0 server
+// (managed at api.mem0.ai or a self-hosted instance).
+type Mem0MemoryConfig struct {
+	// Enabled enables transcript syncing to Mem0.
+	Enabled bool `json:"enabled" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_MEM0_ENABLED"`
+	// BaseURL is the Mem0 server base URL.
+	BaseURL string `json:"base_url,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_MEM0_BASE_URL"`
+	// APIKey authenticates against the Mem0 server (Bearer token).
+	APIKey string `json:"api_key,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_MEM0_API_KEY"`
+	// UserID scopes stored memories to the human user.
+	UserID string `json:"user_id,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_MEM0_USER_ID"`
+	// AgentID scopes stored memories to the agent. Empty uses the agent ID.
+	AgentID string `json:"agent_id,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_MEM0_AGENT_ID"`
+	// SyncEveryTurns syncs once every N completed turns (min 1). 0 uses the default.
+	SyncEveryTurns int `json:"sync_every_turns,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_MEM0_SYNC_EVERY_TURNS"`
+}
+
+// RetainDBMemoryConfig configures pushing conversation transcripts to a RetainDB
+// server.
+type RetainDBMemoryConfig struct {
+	// Enabled enables transcript syncing to RetainDB.
+	Enabled bool `json:"enabled" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_RETAINDB_ENABLED"`
+	// BaseURL is the RetainDB server base URL.
+	BaseURL string `json:"base_url,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_RETAINDB_BASE_URL"`
+	// APIKey authenticates against the RetainDB server (Bearer token).
+	APIKey string `json:"api_key,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_RETAINDB_API_KEY"`
+	// Namespace scopes stored data. Empty uses the agent ID.
+	Namespace string `json:"namespace,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_RETAINDB_NAMESPACE"`
+	// SyncEveryTurns syncs once every N completed turns (min 1). 0 uses the default.
+	SyncEveryTurns int `json:"sync_every_turns,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_RETAINDB_SYNC_EVERY_TURNS"`
 }
 
 const (
@@ -475,10 +533,33 @@ const (
 	DefaultMemorySyncEveryTurns     = 10
 	DefaultHonchoBaseURL            = "https://api.honcho.dev"
 	DefaultHonchoUserPeerID         = "user"
+	DefaultMem0BaseURL              = "https://api.mem0.ai"
 	// HonchoTriggerAuto pushes transcripts without asking the user.
 	HonchoTriggerAuto = "auto"
 	// HonchoTriggerAsk stages a pending batch awaiting user approval.
 	HonchoTriggerAsk = "ask"
+
+	// HonchoRecallHybrid injects context and exposes recall tools.
+	HonchoRecallHybrid = "hybrid"
+	// HonchoRecallContext injects context only (tools hidden).
+	HonchoRecallContext = "context"
+	// HonchoRecallTools exposes tools only (no auto-injection).
+	HonchoRecallTools = "tools"
+	// HonchoRecallOff disables reading memory back from Honcho.
+	HonchoRecallOff = "off"
+
+	// DefaultHonchoContextCadence is the min turns between context prefetches.
+	DefaultHonchoContextCadence = 1
+	// DefaultHonchoDialecticCadence is the min turns between dialectic calls.
+	DefaultHonchoDialecticCadence = 2
+	// DefaultHonchoDialecticLevel is the default dialectic reasoning level.
+	DefaultHonchoDialecticLevel = "low"
+
+	// Memory provider identifiers for MemoryConfig.Provider.
+	MemoryProviderLocal    = "local"
+	MemoryProviderHoncho   = "honcho"
+	MemoryProviderMem0     = "mem0"
+	MemoryProviderRetainDB = "retaindb"
 )
 
 // EffectiveLongTermCharLimit returns the configured cap or the default.
@@ -540,6 +621,130 @@ func (h HonchoMemoryConfig) EffectiveSyncEveryTurns() int {
 // AskFirst reports whether transcript pushes need explicit user approval.
 func (h HonchoMemoryConfig) AskFirst() bool {
 	return h.Trigger == HonchoTriggerAsk
+}
+
+// EffectiveRecallMode resolves the recall mode. An empty value defaults to
+// "hybrid"; unknown values fall back to "off" so a typo never silently
+// enables extra API traffic.
+func (h HonchoMemoryConfig) EffectiveRecallMode() string {
+	switch strings.ToLower(strings.TrimSpace(h.RecallMode)) {
+	case HonchoRecallHybrid:
+		return HonchoRecallHybrid
+	case HonchoRecallContext:
+		return HonchoRecallContext
+	case HonchoRecallTools:
+		return HonchoRecallTools
+	case HonchoRecallOff:
+		return HonchoRecallOff
+	case "":
+		return HonchoRecallHybrid
+	default:
+		return HonchoRecallOff
+	}
+}
+
+// InjectsContext reports whether the recall mode injects context into prompts.
+func (h HonchoMemoryConfig) InjectsContext() bool {
+	switch h.EffectiveRecallMode() {
+	case HonchoRecallHybrid, HonchoRecallContext:
+		return true
+	default:
+		return false
+	}
+}
+
+// ExposesTools reports whether the recall mode exposes Honcho tools.
+func (h HonchoMemoryConfig) ExposesTools() bool {
+	switch h.EffectiveRecallMode() {
+	case HonchoRecallHybrid, HonchoRecallTools:
+		return true
+	default:
+		return false
+	}
+}
+
+// EffectiveContextCadence returns the configured cadence or the default.
+func (h HonchoMemoryConfig) EffectiveContextCadence() int {
+	if h.ContextCadence > 0 {
+		return h.ContextCadence
+	}
+	return DefaultHonchoContextCadence
+}
+
+// EffectiveDialecticCadence returns the configured cadence or the default.
+func (h HonchoMemoryConfig) EffectiveDialecticCadence() int {
+	if h.DialecticCadence > 0 {
+		return h.DialecticCadence
+	}
+	return DefaultHonchoDialecticCadence
+}
+
+// EffectiveDialecticLevel returns the configured dialectic level or the default.
+func (h HonchoMemoryConfig) EffectiveDialecticLevel() string {
+	if s := strings.TrimSpace(h.DialecticLevel); s != "" {
+		return s
+	}
+	return DefaultHonchoDialecticLevel
+}
+
+// EffectiveContextTokens returns the configured context budget, or 0 (uncapped).
+func (h HonchoMemoryConfig) EffectiveContextTokens() int {
+	if h.ContextTokens > 0 {
+		return h.ContextTokens
+	}
+	return 0
+}
+
+// EffectiveMemoryProvider resolves the selected external memory backend. An
+// empty provider keeps legacy behavior: a previously enabled Honcho config is
+// still honored, otherwise "local" (built-in memory only) is used.
+func (m MemoryConfig) EffectiveMemoryProvider() string {
+	switch strings.ToLower(strings.TrimSpace(m.Provider)) {
+	case MemoryProviderHoncho:
+		return MemoryProviderHoncho
+	case MemoryProviderMem0:
+		return MemoryProviderMem0
+	case MemoryProviderRetainDB:
+		return MemoryProviderRetainDB
+	case MemoryProviderLocal:
+		return MemoryProviderLocal
+	case "":
+		if m.Honcho.Enabled {
+			return MemoryProviderHoncho
+		}
+		return MemoryProviderLocal
+	default:
+		return MemoryProviderLocal
+	}
+}
+
+// EffectiveBaseURL returns the configured Mem0 server or the default.
+func (m Mem0MemoryConfig) EffectiveBaseURL() string {
+	if s := strings.TrimSpace(m.BaseURL); s != "" {
+		return strings.TrimRight(s, "/")
+	}
+	return DefaultMem0BaseURL
+}
+
+// EffectiveSyncEveryTurns returns the configured cadence or the default.
+func (m Mem0MemoryConfig) EffectiveSyncEveryTurns() int {
+	if m.SyncEveryTurns > 0 {
+		return m.SyncEveryTurns
+	}
+	return DefaultMemorySyncEveryTurns
+}
+
+// EffectiveBaseURL returns the configured RetainDB server, or "" if unset.
+func (m RetainDBMemoryConfig) EffectiveBaseURL() string {
+	return strings.TrimRight(strings.TrimSpace(m.BaseURL), "/")
+}
+
+// EffectiveSyncEveryTurns returns the configured cadence or the default.
+func (m RetainDBMemoryConfig) EffectiveSyncEveryTurns() int {
+	if m.SyncEveryTurns > 0 {
+		return m.SyncEveryTurns
+	}
+	return DefaultMemorySyncEveryTurns
 }
 
 type AgentDefaults struct {

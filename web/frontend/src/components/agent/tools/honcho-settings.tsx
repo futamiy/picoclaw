@@ -210,7 +210,7 @@ export function HonchoSettings({
   )
 }
 
-function SettingRow({
+export function SettingRow({
   label,
   description,
   children,

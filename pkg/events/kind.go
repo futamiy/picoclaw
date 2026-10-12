@@ -26,6 +26,12 @@ const (
 	// KindAgentMemoryHonchoAwaitingApproval is emitted when a Honcho batch
 	// was staged and awaits user approval.
 	KindAgentMemoryHonchoAwaitingApproval Kind = "agent.memory.honcho.awaiting_approval"
+	// KindAgentMemoryHonchoPrefetched is emitted when a background recall from
+	// Honcho refreshes the cached memory block for a session.
+	KindAgentMemoryHonchoPrefetched Kind = "agent.memory.honcho.prefetched"
+	// KindAgentMemoryHonchoReasoned is emitted when a Honcho tool performs a
+	// read/reasoning call (context, profile, search, reason, conclude).
+	KindAgentMemoryHonchoReasoned Kind = "agent.memory.honcho.reasoned"
 
 	// KindAgentToolExecStart is emitted before a tool executes.
 	KindAgentToolExecStart Kind = "agent.tool.exec_start"
@@ -124,6 +130,8 @@ var knownKinds = []Kind{
 	KindAgentMemoryExtract,
 	KindAgentMemoryHonchoSynced,
 	KindAgentMemoryHonchoAwaitingApproval,
+	KindAgentMemoryHonchoPrefetched,
+	KindAgentMemoryHonchoReasoned,
 	KindAgentToolExecStart,
 	KindAgentToolExecEnd,
 	KindAgentToolExecSkipped,

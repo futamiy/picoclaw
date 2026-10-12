@@ -98,6 +98,8 @@ export async function updateWebSearchConfig(
   })
 }
 
+export type MemoryProvider = "local" | "honcho" | "mem0" | "retaindb"
+
 export interface HonchoConfig {
   enabled: boolean
   base_url?: string
@@ -110,8 +112,30 @@ export interface HonchoConfig {
   sync_every_turns: number
 }
 
+export interface Mem0Config {
+  enabled: boolean
+  base_url?: string
+  api_key_set: boolean
+  api_key?: string
+  clear_api_key?: boolean
+  user_id?: string
+  agent_id?: string
+  sync_every_turns: number
+}
+
+export interface RetainDBConfig {
+  enabled: boolean
+  base_url?: string
+  api_key_set: boolean
+  api_key?: string
+  clear_api_key?: boolean
+  namespace?: string
+  sync_every_turns: number
+}
+
 export interface MemoryConfigResponse {
   enabled: boolean
+  provider: MemoryProvider
   long_term_char_limit: number
   daily_notes_enabled: boolean
   daily_notes_days: number
@@ -120,6 +144,8 @@ export interface MemoryConfigResponse {
   extract_every_turns: number
   extract_model?: string
   honcho: HonchoConfig
+  mem0: Mem0Config
+  retaindb: RetainDBConfig
 }
 
 export interface HonchoPendingItem {
@@ -179,10 +205,22 @@ export async function testHoncho(
   baseUrl?: string,
   apiKey?: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const res = await launcherFetch("/api/tools/memory/honcho/test", {
+  return testMemoryProvider("honcho", baseUrl, apiKey)
+}
+
+export async function testMemoryProvider(
+  provider: MemoryProvider,
+  baseUrl?: string,
+  apiKey?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const res = await launcherFetch("/api/tools/memory/test", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ base_url: baseUrl ?? "", api_key: apiKey ?? "" }),
+    body: JSON.stringify({
+      provider,
+      base_url: baseUrl ?? "",
+      api_key: apiKey ?? "",
+    }),
   })
   const body = (await res.json().catch(() => ({ ok: false }))) as {
     ok: boolean

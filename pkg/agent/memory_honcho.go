@@ -16,11 +16,21 @@ const (
 	honchoSyncEveryTurnsMin = 1
 	// maxHonchoTranscriptRunes bounds how much conversation is sent to Honcho.
 	maxHonchoTranscriptRunes = 20000
+	// honchoPrefetchTimeout bounds a single read/reasoning call. Kept short so
+	// background prefetches never pile up on a slow server.
+	honchoPrefetchTimeout = 8 * time.Second
+	// maxHonchoContextRunes bounds the injected memory block.
+	maxHonchoContextRunes = 4000
+	// maxHonchoCacheKeys bounds the per-session prefetch cache.
+	maxHonchoCacheKeys = 64
 )
 
 // HonchoSyncer syncs conversation transcripts to a Honcho server at a turn
 // cadence. When the config specifies "ask", batches are staged for user approval
 // (written to disk) instead of being pushed directly.
+//
+// When recall is enabled it also prefetches memory back from Honcho in the
+// background and caches it per session so turns never block on the network.
 type HonchoSyncer struct {
 	agent       *AgentInstance
 	client      *honcho.Client
@@ -31,9 +41,30 @@ type HonchoSyncer struct {
 	triggerAuto bool // true if trigger is "auto"; else ask mode (stage only)
 	sanitize    func(string) string
 
+	// Recall configuration.
+	recallEnabled    bool
+	contextCadence   int
+	dialecticCadence int
+	dialecticLevel   string
+	contextTokens    int
+
 	countMu sync.Mutex
 	counts  map[string]int // sessionKey -> message count at last sync
 	syncing sync.Map       // "agentID:sessionKey" -> bool, dedup in-flight
+
+	prefetchMu sync.Mutex
+	prefetch   map[string]*honchoPrefetchEntry
+	// loop is captured lazily from MaybeSync so background prefetches can emit
+	// events. Guarded by prefetchMu.
+	loop *AgentLoop
+}
+
+// honchoPrefetchEntry is the per-session cached recall block. It is guarded by
+// HonchoSyncer.prefetchMu.
+type honchoPrefetchEntry struct {
+	content  string
+	lastTurn int
+	inFlight bool
 }
 
 func newHonchoSyncer(agent *AgentInstance, client *honcho.Client, hcfg honchoConfig, sanitize func(string) string) *HonchoSyncer {
@@ -46,33 +77,249 @@ func newHonchoSyncer(agent *AgentInstance, client *honcho.Client, hcfg honchoCon
 		wid = agent.ID
 	}
 	agentPeer := agent.ID
+	if hcfg.AgentPeerID != "" {
+		agentPeer = hcfg.AgentPeerID
+	}
+	ctxCadence := hcfg.ContextCadence
+	if ctxCadence < 1 {
+		ctxCadence = 1
+	}
+	diaCadence := hcfg.DialecticCadence
+	if diaCadence < 1 {
+		diaCadence = 1
+	}
 	return &HonchoSyncer{
-		agent:       agent,
-		client:      client,
-		workspaceID: wid,
-		userPeerID:  hcfg.UserPeerID,
-		agentPeerID: agentPeer,
-		everyTurns:  every,
-		triggerAuto: hcfg.TriggerAuto,
-		sanitize:    sanitize,
-		counts:      make(map[string]int),
+		agent:            agent,
+		client:           client,
+		workspaceID:      wid,
+		userPeerID:       hcfg.UserPeerID,
+		agentPeerID:      agentPeer,
+		everyTurns:       every,
+		triggerAuto:      hcfg.TriggerAuto,
+		sanitize:         sanitize,
+		recallEnabled:    hcfg.RecallEnabled,
+		contextCadence:   ctxCadence,
+		dialecticCadence: diaCadence,
+		dialecticLevel:   hcfg.DialecticLevel,
+		contextTokens:    hcfg.ContextTokens,
+		counts:           make(map[string]int),
+		prefetch:         make(map[string]*honchoPrefetchEntry),
 	}
 }
 
 type honchoConfig struct {
-	WorkspaceID string
-	UserPeerID  string
-	TriggerAuto bool
-	EveryTurns  int
+	WorkspaceID      string
+	UserPeerID       string
+	AgentPeerID      string
+	TriggerAuto      bool
+	EveryTurns       int
+	RecallEnabled    bool
+	ContextCadence   int
+	DialecticCadence int
+	DialecticLevel   string
+	ContextTokens    int
 }
 
-// MaybeSyncHoncho pushes staged conversations to Honcho when the cadence is
+// RecallContext returns the cached Honcho memory block for sessionKey, kicking
+// off a background refresh when the cadence is met. It never blocks on the
+// network: a miss returns "" until a background fetch completes.
+func (hs *HonchoSyncer) RecallContext(sessionKey string) string {
+	if hs == nil || !hs.recallEnabled || sessionKey == "" {
+		return ""
+	}
+	hs.maybePrefetch(sessionKey)
+
+	hs.prefetchMu.Lock()
+	defer hs.prefetchMu.Unlock()
+	if e := hs.prefetch[sessionKey]; e != nil {
+		return e.content
+	}
+	return ""
+}
+
+// maybePrefetch schedules a background context fetch for sessionKey if the
+// cadence has elapsed and no fetch is already in flight.
+func (hs *HonchoSyncer) maybePrefetch(sessionKey string) {
+	if hs.client == nil {
+		return
+	}
+	historyLen := 0
+	if hs.agent != nil && hs.agent.Sessions != nil {
+		historyLen = len(hs.agent.Sessions.GetHistory(sessionKey))
+	}
+
+	hs.prefetchMu.Lock()
+	e := hs.prefetch[sessionKey]
+	if e == nil {
+		e = &honchoPrefetchEntry{}
+		if len(hs.prefetch) >= maxHonchoCacheKeys {
+			hs.evictOldestLocked()
+		}
+		hs.prefetch[sessionKey] = e
+	}
+	if e.inFlight {
+		hs.prefetchMu.Unlock()
+		return
+	}
+	if e.content != "" && historyLen-e.lastTurn < hs.contextCadence {
+		hs.prefetchMu.Unlock()
+		return
+	}
+	e.inFlight = true
+	e.lastTurn = historyLen
+	hs.prefetchMu.Unlock()
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.WarnCF("agent", "Honcho prefetch panic recovered", map[string]any{
+					"session_key": sessionKey,
+					"panic":       r,
+				})
+			}
+		}()
+
+		content := hs.fetchContext(sessionKey)
+
+		hs.prefetchMu.Lock()
+		if entry := hs.prefetch[sessionKey]; entry != nil {
+			entry.inFlight = false
+			if content != "" {
+				entry.content = content
+			}
+		}
+		al := hs.loop
+		hs.prefetchMu.Unlock()
+
+		if content != "" {
+			logger.DebugCF("agent", "Honcho context prefetched", map[string]any{
+				"session_key": sessionKey,
+				"chars":       len([]rune(content)),
+			})
+			if al != nil {
+				al.emitEvent(
+					runtimeevents.KindAgentMemoryHonchoPrefetched,
+					al.newTurnEventScope(hs.agent.ID, sessionKey, nil).
+						meta(0, "honchoPrefetch", "turn.memory.honcho.prefetched"),
+					HonchoPrefetchedPayload{
+						SessionKey:  sessionKey,
+						AgentID:     hs.agent.ID,
+						WorkspaceID: hs.workspaceID,
+						Chars:       len([]rune(content)),
+					},
+				)
+			}
+		}
+	}()
+}
+
+// evictOldestLocked drops one cache entry to bound memory. The map iteration
+// order is random; dropping any entry is acceptable since they are rebuilt
+// on demand.
+func (hs *HonchoSyncer) evictOldestLocked() {
+	for k := range hs.prefetch {
+		delete(hs.prefetch, k)
+		return
+	}
+}
+
+// fetchContext pulls the session summary and peer representation and renders a
+// compact memory block. Errors are logged and surfaced as an empty string.
+func (hs *HonchoSyncer) fetchContext(sessionKey string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), honchoPrefetchTimeout)
+	defer cancel()
+
+	// Prefer the session context (summary + representation) when available;
+	// fall back to the peer representation alone.
+	if sc, err := hs.client.GetSessionContext(ctx, hs.workspaceID, sessionKey, honcho.SessionContextOptions{
+		Tokens:     hs.contextTokens,
+		Summary:    true,
+		PeerTarget: hs.userPeerID,
+	}); err == nil && sc != nil {
+		if block := renderHonchoContext(sc.Summary, sc.PeerRepr, sc.PeerCards); block != "" {
+			return block
+		}
+	} else if err != nil {
+		logger.DebugCF("agent", "Honcho session context fetch failed", map[string]any{
+			"session_key": sessionKey,
+			"error":       err,
+		})
+	}
+
+	pc, err := hs.client.GetPeerContext(ctx, hs.workspaceID, hs.agentPeerID, hs.userPeerID)
+	if err != nil {
+		logger.DebugCF("agent", "Honcho peer context fetch failed", map[string]any{
+			"session_key": sessionKey,
+			"error":       err,
+		})
+		return ""
+	}
+	return renderHonchoContext(nil, pc.Representation, pc.PeerCard)
+}
+
+// renderHonchoContext composes the injected block from the available pieces,
+// returning "" when nothing useful was retrieved.
+func renderHonchoContext(summary *honcho.Summary, representation string, cards []string) string {
+	var b strings.Builder
+	if summary != nil && strings.TrimSpace(summary.Content) != "" {
+		b.WriteString("Session summary:\n")
+		b.WriteString(strings.TrimSpace(summary.Content))
+		b.WriteString("\n")
+	}
+	if r := strings.TrimSpace(representation); r != "" {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString("What you know about the user:\n")
+		b.WriteString(r)
+		b.WriteString("\n")
+	}
+	if len(cards) > 0 {
+		items := make([]string, 0, len(cards))
+		for _, c := range cards {
+			if s := strings.TrimSpace(c); s != "" {
+				items = append(items, "- "+s)
+			}
+		}
+		if len(items) > 0 {
+			if b.Len() > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString("User card:\n")
+			b.WriteString(strings.Join(items, "\n"))
+			b.WriteString("\n")
+		}
+	}
+	out := strings.TrimSpace(b.String())
+	if out == "" {
+		return ""
+	}
+	return truncateHonchoRunes(out, maxHonchoContextRunes)
+}
+
+func truncateHonchoRunes(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
+}
+
+// MaybeSync pushes staged conversations to Honcho when the cadence is
 // met. If in "ask" mode, it writes a pending batch to disk and emits an
 // awaiting-approval event instead of pushing.
-func (hs *HonchoSyncer) MaybeSyncHoncho(al *AgentLoop, sessionKey string) {
+func (hs *HonchoSyncer) MaybeSync(al *AgentLoop, sessionKey string) {
 	agent := hs.agent
 	if al == nil || agent == nil || agent.Sessions == nil || hs.client == nil {
 		return
+	}
+	if hs.recallEnabled {
+		hs.prefetchMu.Lock()
+		hs.loop = al
+		hs.prefetchMu.Unlock()
 	}
 	history := agent.Sessions.GetHistory(sessionKey)
 	if len(history) == 0 {

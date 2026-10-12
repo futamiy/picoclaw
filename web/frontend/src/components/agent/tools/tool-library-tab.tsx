@@ -165,8 +165,9 @@ function ToolCard({
   const isEnabled = tool.status === "enabled"
   const isToggledOn = tool.status !== "disabled"
   const isDisabled = tool.status === "disabled"
-  const isBlocked = tool.status === "blocked"
-  const isMemoryTool = tool.name === "memory"
+   const isBlocked = tool.status === "blocked"
+   const isWebSearchTool = tool.name === "web_search"
+   const isMemoryTool = tool.name === "memory"
 
   return (
     <Card
@@ -217,6 +218,7 @@ function ToolCard({
                 <IconSettings className="size-4" />
               </Button>
             )}
+            <Switch
               checked={isToggledOn}
               disabled={isPending}
               onCheckedChange={(checked) => onToggleTool(tool.name, checked)}
