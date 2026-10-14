@@ -68,6 +68,19 @@ type TelegramChannel struct {
 	mediaGroupMu    sync.Mutex
 	mediaGroups     map[string]*telegramMediaGroup
 	mediaGroupDelay time.Duration
+
+	actionMu     sync.Mutex
+	actionTokens map[string]telegramActionToken
+}
+
+// telegramActionToken is a server-side record for an interactive action button
+// referenced by an opaque, short callback token (Telegram caps callback_data at
+// 64 bytes, so we never put routing info in the data itself).
+type telegramActionToken struct {
+	action    string
+	chatID    string
+	sessionID string
+	expiresAt time.Time
 }
 
 type telegramMediaGroup struct {
@@ -137,6 +150,8 @@ func NewTelegramChannel(
 
 		mediaGroups:     make(map[string]*telegramMediaGroup),
 		mediaGroupDelay: telegramMediaGroupDelay(telegramCfg),
+
+		actionTokens: make(map[string]telegramActionToken),
 	}
 	ch.progress = channels.NewToolFeedbackAnimator(ch.EditMessage)
 	return ch, nil
@@ -172,6 +187,8 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
 		return c.handleMessage(ctx, &message)
 	}, th.AnyMessage())
+
+	c.startActionCallbacks(bh)
 
 	c.SetRunning(true)
 	logger.InfoCF("telegram", "Telegram bot connected", map[string]any{
@@ -256,6 +273,7 @@ func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]
 	// so msg.Content is guaranteed to be within that limit. We still need to
 	// check if HTML expansion pushes it beyond Telegram's 4096-char API limit.
 	replyToID := msg.ReplyToMessageID
+	actionKeyboard := c.buildActionKeyboard(msg, msg.ChatID)
 	var messageIDs []string
 	queue := []string{msg.Content}
 	if isToolFeedback {
@@ -292,12 +310,14 @@ func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]
 					replyToID:     replyToID,
 					mdFallback:    chunk,
 					useMarkdownV2: useMarkdownV2,
+					keyboard:      actionKeyboard,
 				})
 				if err != nil {
 					return nil, err
 				}
 				messageIDs = append(messageIDs, msgID)
 				replyToID = ""
+				actionKeyboard = nil
 				continue
 			}
 
@@ -332,6 +352,7 @@ func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]
 			replyToID:     replyToID,
 			mdFallback:    chunk,
 			useMarkdownV2: useMarkdownV2,
+			keyboard:      actionKeyboard,
 		})
 		if err != nil {
 			return nil, err
@@ -339,6 +360,7 @@ func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]
 		messageIDs = append(messageIDs, msgID)
 		// Only the first chunk should be a reply; subsequent chunks are normal messages.
 		replyToID = ""
+		actionKeyboard = nil
 	}
 
 	if isToolFeedback && len(messageIDs) > 0 {
@@ -357,6 +379,7 @@ type sendChunkParams struct {
 	replyToID     string
 	mdFallback    string
 	useMarkdownV2 bool
+	keyboard      *telego.InlineKeyboardMarkup
 }
 
 // sendChunk sends a single HTML/MarkdownV2 message, falling back to the original
@@ -367,6 +390,9 @@ func (c *TelegramChannel) sendChunk(
 ) (string, error) {
 	tgMsg := tu.Message(tu.ID(params.chatID), params.content)
 	tgMsg.MessageThreadID = params.threadID
+	if params.keyboard != nil {
+		tgMsg.ReplyMarkup = params.keyboard
+	}
 	if params.useMarkdownV2 {
 		tgMsg.WithParseMode(telego.ModeMarkdownV2)
 	} else {

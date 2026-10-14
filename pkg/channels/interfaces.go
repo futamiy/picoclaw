@@ -52,6 +52,20 @@ type PlaceholderCapable interface {
 	SendPlaceholder(ctx context.Context, chatID string) (messageID string, err error)
 }
 
+// ContinueCapable — channels that can render interactive message actions
+// (e.g. a "continue" inline button) and route the user's response back into
+// the normal inbound command flow. Channels implementing this MUST also be
+// capable of deleting messages (MessageDeleter) so a triggered action message
+// can be cleared before the result is delivered.
+//
+// Manager.preSend uses SupportsMessageActions to decide whether to send the
+// final message as a new message (See config Placeholder.FinalAsNewMessage) and
+// the agent uses it to gate attaching bus.MessageAction values.
+type ContinueCapable interface {
+	// SupportsMessageActions reports whether the channel can render actions.
+	SupportsMessageActions() bool
+}
+
 // StreamingCapable — channels that can show partial LLM output in real-time.
 // The channel SHOULD gracefully degrade if the platform rejects streaming
 // (e.g. Telegram bot without forum mode). In that case, Update becomes a no-op

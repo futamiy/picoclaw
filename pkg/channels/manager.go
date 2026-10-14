@@ -305,6 +305,22 @@ func (m *Manager) toolFeedbackSeparateMessagesEnabled() bool {
 	return m.config.Agents.Defaults.IsToolFeedbackSeparateMessagesEnabled()
 }
 
+// finalAsNewMessageEnabled reports whether the named channel should deliver the
+// final answer as a new message (deleting the placeholder first) instead of
+// editing the placeholder in place. Requires the per-channel
+// placeholder.final_as_new_message toggle and a channel that supports message
+// actions (ContinueCapable).
+func (m *Manager) finalAsNewMessageEnabled(channelName string) bool {
+	if m == nil || m.config == nil {
+		return false
+	}
+	bc, ok := m.config.Channels[channelName]
+	if !ok || bc == nil {
+		return false
+	}
+	return bc.IsFinalAsNewMessageEnabled()
+}
+
 // RecordPlaceholder registers a placeholder message for later editing.
 // Implements PlaceholderRecorder.
 func (m *Manager) RecordPlaceholder(channel, chatID, placeholderID string) {
@@ -455,6 +471,44 @@ func (m *Manager) preSend(ctx context.Context, name string, msg bus.OutboundMess
 
 	if separateToolFeedbackMessages {
 		clearTrackedToolFeedbackMessage(ch, chatID, &msg.Context)
+	}
+
+	// 4b. Placeholder-as-new-message: when enabled for this channel, delete the
+	// "Thinking…" placeholder and let the final answer be delivered as a brand
+	// new message so platforms that only notify on new messages (e.g. Telegram)
+	// ring the user. Only applies to the final response and only when the
+	// channel actually supports message actions (ContinueCapable), keeping the
+	// behavior scoped to capable channels.
+	if _, capable := ch.(ContinueCapable); capable && m.finalAsNewMessageEnabled(name) && isFinalMessage {
+		if v, loaded := m.placeholders.LoadAndDelete(key); loaded {
+			if entry, ok := v.(placeholderEntry); ok && entry.id != "" {
+				if deleter, ok := ch.(MessageDeleter); ok {
+					deleter.DeleteMessage(ctx, chatID, entry.id) // best effort
+				}
+			}
+		}
+		if !isToolFeedback {
+			clearTrackedToolFeedbackMessage(ch, chatID, &msg.Context)
+		}
+		return nil, false
+	}
+
+	// 4c. Interactive actions (e.g. a "Continue" button): a message carrying
+	// inline actions must be delivered as its own new message — buttons cannot be
+	// attached via a placeholder edit, and it must ring as a new message. Always
+	// delete the placeholder and fall through to a fresh Send.
+	if len(msg.Actions) > 0 {
+		if v, loaded := m.placeholders.LoadAndDelete(key); loaded {
+			if entry, ok := v.(placeholderEntry); ok && entry.id != "" {
+				if deleter, ok := ch.(MessageDeleter); ok {
+					deleter.DeleteMessage(ctx, chatID, entry.id) // best effort
+				}
+			}
+		}
+		if !isToolFeedback {
+			clearTrackedToolFeedbackMessage(ch, chatID, &msg.Context)
+		}
+		return nil, false
 	}
 
 	// 5. Try editing placeholder

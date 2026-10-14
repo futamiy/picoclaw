@@ -64,4 +64,7 @@ type Runtime struct {
 	ClearHistory       func() error
 	ReloadConfig       func() error
 	StopActiveTurn     func() (StopResult, error)
+	// Continue resumes the current session's turn (e.g. after a tool-iteration
+	// limit or transient failure) and returns the continued response text.
+	Continue func(ctx context.Context) (string, error)
 }

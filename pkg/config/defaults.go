@@ -42,6 +42,9 @@ func DefaultConfig() *Config {
 					MaxArgsLength:    300,
 					SeparateMessages: false,
 				},
+				ErrorActions: ErrorActionsConfig{
+					ContinueButton: boolPtr(DefaultContinueButtonEnabled),
+				},
 				SplitOnMarker:       false,
 				MaxLLMRetries:       2,
 				LLMRetryBackoffSecs: 2,

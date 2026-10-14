@@ -20,8 +20,71 @@ func (al *AgentLoop) maybePublishError(ctx context.Context, channel, chatID, ses
 	if errors.Is(err, context.Canceled) {
 		return false
 	}
-	al.PublishResponseIfNeeded(ctx, channel, chatID, sessionKey, formatProcessingError(err))
+	al.publishResponseWithActionsIfNeeded(ctx, channel, chatID, sessionKey, formatProcessingError(err), err)
 	return true
+}
+
+// continueAction returns the bus action that lets a user resume a turn that
+// stopped early (tool-iteration limit or exhausted transient LLM retries) on
+// channels that can render interactive actions.
+func continueAction() bus.MessageAction {
+	return bus.MessageAction{
+		Type:  bus.ActionContinue,
+		Label: "▶️ Continue",
+	}
+}
+
+// isRecoverableProcessingError reports whether err represents a condition the
+// user can plausibly recover from by continuing (rather than a permanent
+// failure such as bad credentials). It mirrors the transient/context
+// classification used by the LLM retry loop.
+func isRecoverableProcessingError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if _, transient := transientLLMRetryReason(err); transient {
+		return true
+	}
+	if isTruncatedAfterConnectError(err) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"context_length_exceeded",
+		"context window",
+		"context_window",
+		"maximum context length",
+		"token limit",
+		"too many tokens",
+		"max_tokens",
+		"invalidparameter",
+		"prompt is too long",
+		"request too large",
+		"empty response",
+	} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// recoverableActionsFor returns the actions to attach to an outbound message
+// whose content is response and whose processing error (if any) is err.
+// Recoverable limit/error conditions produce a "continue" action when the
+// feature is enabled; normal answers and permanent errors produce none.
+func (al *AgentLoop) recoverableActionsFor(response string, err error) []bus.MessageAction {
+	cfg := al.GetConfig()
+	if cfg == nil || !cfg.Agents.Defaults.IsContinueButtonEnabled() {
+		return nil
+	}
+	if strings.TrimSpace(response) == toolLimitResponse {
+		return []bus.MessageAction{continueAction()}
+	}
+	if isRecoverableProcessingError(err) {
+		return []bus.MessageAction{continueAction()}
+	}
+	return nil
 }
 
 func (al *AgentLoop) publishResponseOrError(
@@ -36,10 +99,30 @@ func (al *AgentLoop) publishResponseOrError(
 		}
 		response = ""
 	}
-	al.PublishResponseIfNeeded(ctx, channel, chatID, sessionKey, response)
+	al.publishResponseWithActionsIfNeeded(ctx, channel, chatID, sessionKey, response, nil)
+}
+
+// publishResponseWithActionsIfNeeded publishes response and attaches recovery
+// actions derived from err (e.g. a "continue" button after a tool-limit stop or
+// exhausted transient retries).
+func (al *AgentLoop) publishResponseWithActionsIfNeeded(
+	ctx context.Context,
+	channel, chatID, sessionKey, response string,
+	err error,
+) {
+	actions := al.recoverableActionsFor(response, err)
+	al.publishResponseIfNeededWithActions(ctx, channel, chatID, sessionKey, response, actions)
 }
 
 func (al *AgentLoop) PublishResponseIfNeeded(ctx context.Context, channel, chatID, sessionKey, response string) {
+	al.publishResponseIfNeededWithActions(ctx, channel, chatID, sessionKey, response, nil)
+}
+
+func (al *AgentLoop) publishResponseIfNeededWithActions(
+	ctx context.Context,
+	channel, chatID, sessionKey, response string,
+	actions []bus.MessageAction,
+) {
 	if response == "" {
 		return
 	}
@@ -81,13 +164,21 @@ func (al *AgentLoop) PublishResponseIfNeeded(ctx context.Context, channel, chatI
 	if sessionKey != "" {
 		msg.ContextUsage = computeContextUsage(al.agentForSession(sessionKey), sessionKey)
 	}
-	markFinalOutbound(&msg)
+	if len(actions) > 0 {
+		msg.Actions = actions
+		// Continue-eligible messages are not marked "final": preSend must not
+		// consume the placeholder path for them, so the actionable message is
+		// delivered as its own (new) message with buttons.
+	} else {
+		markFinalOutbound(&msg)
+	}
 	al.bus.PublishOutbound(ctx, msg)
 	logger.InfoCF("agent", "Published outbound response",
 		map[string]any{
 			"channel":     channel,
 			"chat_id":     chatID,
 			"content_len": len(response),
+			"actions":     len(actions),
 		})
 }
 

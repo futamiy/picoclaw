@@ -897,3 +897,33 @@ func TestCloseIdempotent(t *testing.T) {
 		t.Fatalf("expected ErrBusClosed after multiple closes, got %v", err)
 	}
 }
+
+func TestOutboundMessage_ActionsPreserved(t *testing.T) {
+	mb := NewMessageBus()
+	defer mb.Close()
+
+	ctx := context.Background()
+
+	msg := OutboundMessage{
+		Context:    NewOutboundContext("telegram", "chat1", ""),
+		SessionKey: "sess-1",
+		Content:    "Reached the tool-iteration limit.",
+		Actions: []MessageAction{
+			{Type: ActionContinue, Label: "▶️ Continue", Token: ""},
+		},
+	}
+	if err := mb.PublishOutbound(ctx, msg); err != nil {
+		t.Fatalf("PublishOutbound failed: %v", err)
+	}
+
+	got := <-mb.OutboundChan()
+	if len(got.Actions) != 1 {
+		t.Fatalf("expected 1 action, got %d", len(got.Actions))
+	}
+	if got.Actions[0].Type != ActionContinue {
+		t.Fatalf("expected action type %q, got %q", ActionContinue, got.Actions[0].Type)
+	}
+	if got.Actions[0].Label == "" {
+		t.Fatal("expected non-empty action label")
+	}
+}

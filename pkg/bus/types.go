@@ -1,5 +1,9 @@
 package bus
 
+// ActionContinue is the MessageAction.Type for resuming a turn that stopped
+// early (e.g. tool-iteration limit or exhausted transient LLM retries).
+const ActionContinue = "continue"
+
 // SenderInfo provides structured sender identity information.
 type SenderInfo struct {
 	Platform    string `json:"platform,omitempty"`     // "telegram", "discord", "slack", ...
@@ -72,16 +76,32 @@ type ContextUsage struct {
 	UsedPercent       int `json:"used_percent"`        // 0-100, relative to compressAt
 }
 
+// MessageAction describes an interactive affordance that a channel may render
+// alongside an outbound message (e.g. an inline button). Actions are optional
+// and channel-agnostic: channels that do not support a given action type simply
+// ignore it.
+type MessageAction struct {
+	// Type is the action kind, e.g. "continue".
+	Type string `json:"type"`
+	// Label is the human-readable button label.
+	Label string `json:"label,omitempty"`
+	// Token is an opaque, channel-local reference used to resolve the action
+	// when the user triggers it (e.g. Telegram callback data). Channels that
+	// need to fit platform limits may replace it with their own short token.
+	Token string `json:"token,omitempty"`
+}
+
 type OutboundMessage struct {
-	Channel          string         `json:"channel"`
-	ChatID           string         `json:"chat_id"`
-	Context          InboundContext `json:"context"`
-	AgentID          string         `json:"agent_id,omitempty"`
-	SessionKey       string         `json:"session_key,omitempty"`
-	Scope            *OutboundScope `json:"scope,omitempty"`
-	Content          string         `json:"content"`
-	ReplyToMessageID string         `json:"reply_to_message_id,omitempty"`
-	ContextUsage     *ContextUsage  `json:"context_usage,omitempty"`
+	Channel          string          `json:"channel"`
+	ChatID           string          `json:"chat_id"`
+	Context          InboundContext  `json:"context"`
+	AgentID          string          `json:"agent_id,omitempty"`
+	SessionKey       string          `json:"session_key,omitempty"`
+	Scope            *OutboundScope  `json:"scope,omitempty"`
+	Content          string          `json:"content"`
+	ReplyToMessageID string          `json:"reply_to_message_id,omitempty"`
+	ContextUsage     *ContextUsage   `json:"context_usage,omitempty"`
+	Actions          []MessageAction `json:"actions,omitempty"`
 }
 
 // MediaPart describes a single media attachment to send.

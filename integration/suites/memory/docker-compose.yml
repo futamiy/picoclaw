@@ -1,0 +1,28 @@
+services:
+  integration-runner:
+    depends_on:
+      memory-shim-honcho:
+        condition: service_healthy
+      memory-shim-mem0:
+        condition: service_healthy
+      memory-shim-retaindb:
+        condition: service_healthy
+    environment:
+      PICOCLAW_MEMTEST_HONCHO_URL: http://memory-shim-honcho:8080
+      PICOCLAW_MEMTEST_MEM0_URL: http://memory-shim-mem0:8080
+      PICOCLAW_MEMTEST_RETAINDB_URL: http://memory-shim-retaindb:8080
+
+  memory-shim-honcho:
+    build:
+      context: ${INTEGRATION_REPO_ROOT}
+      dockerfile: integration/fixtures/memory-shim/Dockerfile
+
+  memory-shim-mem0:
+    build:
+      context: ${INTEGRATION_REPO_ROOT}
+      dockerfile: integration/fixtures/memory-shim/Dockerfile
+
+  memory-shim-retaindb:
+    build:
+      context: ${INTEGRATION_REPO_ROOT}
+      dockerfile: integration/fixtures/memory-shim/Dockerfile

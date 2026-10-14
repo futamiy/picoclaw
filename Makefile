@@ -35,12 +35,17 @@ LDFLAGS=-X $(CONFIG_PKG).Version=$(VERSION) -X $(CONFIG_PKG).GitCommit=$(GIT_COM
 GO?=go
 WEB_GO?=$(GO)
 CGO_ENABLED?=0
+# Silence -Wdiscarded-qualifiers from the vendored SQLite amalgamation in
+# github.com/mattn/go-sqlite3 (upstream C, not fixable here). Only relevant when
+# CGO is enabled; harmless otherwise. Override via the environment if needed.
+CGO_CFLAGS?=-Wno-discarded-qualifiers
 GO_BUILD_TAGS?=goolm,stdjson
 GOFLAGS?=-v -tags $(GO_BUILD_TAGS)
 GOCACHE?=$(CURDIR)/.cache/go-build
 GOMODCACHE?=$(CURDIR)/.cache/go-mod
 GOTOOLCHAIN?=local
 export CGO_ENABLED
+export CGO_CFLAGS
 export GOCACHE
 export GOMODCACHE
 export GOTOOLCHAIN
@@ -133,7 +138,7 @@ ifeq ($(UNAME_S),Linux)
 	endif
 else ifeq ($(UNAME_S),Darwin)
 	PLATFORM=darwin
-	WEB_GO=CGO_LDFLAGS="-mmacosx-version-min=10.11" CGO_CFLAGS="-mmacosx-version-min=10.11" CGO_ENABLED=1 go
+	WEB_GO=CGO_LDFLAGS="-mmacosx-version-min=10.11" CGO_CFLAGS="-mmacosx-version-min=10.11 -Wno-discarded-qualifiers" CGO_ENABLED=1 go
 	ifeq ($(UNAME_M),x86_64)
 		ARCH?=amd64
 	else ifeq ($(UNAME_M),arm64)

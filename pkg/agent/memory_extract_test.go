@@ -42,7 +42,8 @@ func TestParseMemoryOps_EmptyArrays(t *testing.T) {
 	}
 }
 
-func TestBuildMemoryTranscript_FiltersNonTurns(t *testing.T) {	history := []providers.Message{
+func TestBuildMemoryTranscript_FiltersNonTurns(t *testing.T) {
+	history := []providers.Message{
 		{Role: "system", Content: "you are an agent"},
 		{Role: "user", Content: "hello"},
 		{Role: "assistant", Content: "hi there"},

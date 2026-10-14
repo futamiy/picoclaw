@@ -1103,6 +1103,86 @@ func TestPreSend_PlaceholderEditSuccess(t *testing.T) {
 	}
 }
 
+func TestPreSend_ActionMessageBypassesPlaceholderEdit(t *testing.T) {
+	m := newTestManager()
+
+	var sendCalled bool
+	editCalled := false
+	ch := &mockDeletingMessageEditor{
+		mockMessageEditor: mockMessageEditor{
+			mockChannel: mockChannel{
+				sendFn: func(_ context.Context, _ bus.OutboundMessage) error {
+					sendCalled = true
+					return nil
+				},
+			},
+			editFn: func(_ context.Context, _, _, _ string) error {
+				editCalled = true
+				return nil
+			},
+		},
+	}
+
+	// Register a placeholder that must be deleted (not edited).
+	m.RecordPlaceholder("test", "123", "456")
+
+	msg := testOutboundMessage(bus.OutboundMessage{
+		Channel: "test",
+		ChatID:  "123",
+		Content: "Reached the tool-iteration limit.",
+		Actions: []bus.MessageAction{{Type: bus.ActionContinue, Label: "Continue"}},
+	})
+
+	ids, handled := m.preSend(context.Background(), "test", msg, ch)
+
+	if handled {
+		t.Fatal("expected preSend to return handled=false so the message is delivered as a new message")
+	}
+	if len(ids) != 0 {
+		t.Fatalf("expected no ids from preSend, got %v", ids)
+	}
+	if editCalled {
+		t.Fatal("expected EditMessage to NOT be called for an action message")
+	}
+	_ = sendCalled // the message is delivered later by the caller, not inside preSend
+	if _, loaded := m.placeholders.Load("test:123"); loaded {
+		t.Fatal("expected placeholder to be consumed/deleted for an action message")
+	}
+	if ch.deleteCalls != 1 {
+		t.Fatalf("expected exactly 1 DeleteMessage call for the placeholder, got %d", ch.deleteCalls)
+	}
+	if ch.deletedMessageID != "456" {
+		t.Fatalf("expected placeholder 456 to be deleted, got %q", ch.deletedMessageID)
+	}
+}
+
+func TestPreSend_NoActionsStillEditsPlaceholder(t *testing.T) {
+	m := newTestManager()
+
+	editCalled := false
+	ch := &mockMessageEditor{
+		editFn: func(_ context.Context, _, _, _ string) error {
+			editCalled = true
+			return nil
+		},
+	}
+	m.RecordPlaceholder("test", "123", "789")
+
+	msg := testOutboundMessage(bus.OutboundMessage{
+		Channel: "test",
+		ChatID:  "123",
+		Content: "final answer",
+	})
+
+	_, handled := m.preSend(context.Background(), "test", msg, ch)
+	if !handled {
+		t.Fatal("expected placeholder edit path to handle a normal final message")
+	}
+	if !editCalled {
+		t.Fatal("expected EditMessage to be called for a normal final message")
+	}
+}
+
 func TestPreSend_ToolFeedbackPlaceholderEditRecordsTrackedMessage(t *testing.T) {
 	m := newTestManager()
 

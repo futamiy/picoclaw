@@ -420,6 +420,15 @@ type ToolFeedbackConfig struct {
 	SeparateMessages bool `json:"separate_messages" env:"PICOCLAW_AGENTS_DEFAULTS_TOOL_FEEDBACK_SEPARATE_MESSAGES"`
 }
 
+// ErrorActionsConfig controls interactive recovery affordances attached to
+// limit/error messages. When ContinueButton is enabled, recoverable failures
+// (tool-iteration limit or exhausted transient LLM retries) are accompanied by
+// a "continue" action on channels that support it (e.g. a Telegram inline
+// button) so the user can resume the turn without retyping.
+type ErrorActionsConfig struct {
+	ContinueButton *bool `json:"continue_button,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_ERROR_ACTIONS_CONTINUE_BUTTON"`
+}
+
 // MemoryConfig configures the agent's persistent memory store.
 // Long-term memory lives in workspace/memory/MEMORY.md (bounded); daily notes
 // live in workspace/memory/YYYYMM/YYYYMMDD.md. Distilled from Hermes Agent.
@@ -560,6 +569,10 @@ const (
 	MemoryProviderHoncho   = "honcho"
 	MemoryProviderMem0     = "mem0"
 	MemoryProviderRetainDB = "retaindb"
+
+	// DefaultContinueButtonEnabled is the default for
+	// error_actions.continue_button when unset.
+	DefaultContinueButtonEnabled = true
 )
 
 // EffectiveLongTermCharLimit returns the configured cap or the default.
@@ -768,6 +781,7 @@ type AgentDefaults struct {
 	MaxParallelTurns          int                `json:"max_parallel_turns,omitempty"     env:"PICOCLAW_AGENTS_DEFAULTS_MAX_PARALLEL_TURNS"` // Max concurrent turns (0 or 1 = sequential)
 	SubTurn                   SubTurnConfig      `json:"subturn"                                                                                      envPrefix:"PICOCLAW_AGENTS_DEFAULTS_SUBTURN_"`
 	ToolFeedback              ToolFeedbackConfig `json:"tool_feedback,omitempty"`
+	ErrorActions              ErrorActionsConfig `json:"error_actions,omitempty"`
 	SplitOnMarker             bool               `json:"split_on_marker"                  env:"PICOCLAW_AGENTS_DEFAULTS_SPLIT_ON_MARKER"` // split messages on <|[SPLIT]|> marker
 	ContextManager            string             `json:"context_manager,omitempty"        env:"PICOCLAW_AGENTS_DEFAULTS_CONTEXT_MANAGER"`
 	ContextManagerConfig      json.RawMessage    `json:"context_manager_config,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_CONTEXT_MANAGER_CONFIG"`
@@ -818,6 +832,17 @@ func (d *AgentDefaults) IsToolFeedbackSeparateMessagesEnabled() bool {
 	return d.ToolFeedback.SeparateMessages
 }
 
+// IsContinueButtonEnabled reports whether recoverable limit/error messages
+// should be accompanied by a "continue" action. Defaults to true when unset so
+// the affordance is available out of the box; set error_actions.continue_button
+// to false to disable it.
+func (d *AgentDefaults) IsContinueButtonEnabled() bool {
+	if d.ErrorActions.ContinueButton == nil {
+		return DefaultContinueButtonEnabled
+	}
+	return *d.ErrorActions.ContinueButton
+}
+
 // GetModelName returns the effective model name for the agent defaults.
 // It prefers the new "model_name" field but falls back to "model" for backward compatibility.
 func (d *AgentDefaults) GetModelName() string {
@@ -850,6 +875,11 @@ type TypingConfig struct {
 type PlaceholderConfig struct {
 	Enabled bool                `json:"enabled"`
 	Text    FlexibleStringSlice `json:"text,omitempty"`
+	// FinalAsNewMessage, when enabled, deletes the placeholder and sends the
+	// final answer as a brand-new message instead of editing the placeholder in
+	// place. This makes platforms that only notify on new messages (e.g.
+	// Telegram) ring the user for the answer. Currently honored for Telegram.
+	FinalAsNewMessage bool `json:"final_as_new_message,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_PLACEHOLDER_FINAL_AS_NEW_MESSAGE"`
 }
 
 // GetRandomText returns a random placeholder text, or default if none set.

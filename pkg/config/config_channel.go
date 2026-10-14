@@ -233,6 +233,13 @@ type Channel struct {
 	extend             any
 }
 
+// IsFinalAsNewMessageEnabled reports whether the final answer should be sent as
+// a new message (after deleting the placeholder) instead of editing the
+// placeholder in place. Defaults to false to preserve existing behavior.
+func (b *Channel) IsFinalAsNewMessageEnabled() bool {
+	return b.Placeholder.FinalAsNewMessage
+}
+
 // MarshalJSON implements json.Marshaler for Channel.
 // Outputs nested format: common fields at top level, channel-specific in "settings".
 // Secure fields (SecureString/SecureStrings) are removed from settings output.
