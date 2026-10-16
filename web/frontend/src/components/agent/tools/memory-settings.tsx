@@ -16,6 +16,11 @@ export function MemorySettings({ draft, onUpdateDraft }: MemorySettingsProps) {
   const { t } = useTranslation()
   const patch = (partial: Partial<MemoryConfigResponse>) =>
     onUpdateDraft((current) => ({ ...current, ...partial }))
+  const patchBackup = (partial: Partial<MemoryConfigResponse["backup"]>) =>
+    onUpdateDraft((current) => ({
+      ...current,
+      backup: { ...current.backup, ...partial },
+    }))
 
   return (
     <div className="space-y-4">
@@ -151,6 +156,95 @@ export function MemorySettings({ draft, onUpdateDraft }: MemorySettingsProps) {
               "pages.agent.tools.memory.extract_model_placeholder",
               "Default model",
             )}
+          />
+        </SettingRow>
+      </div>
+
+      <h3 className="text-foreground/80 pt-2 text-[13px] font-bold tracking-widest uppercase">
+        {t("pages.agent.tools.memory.backup_title", "Memory Backup")}
+      </h3>
+
+      <div className="bg-card border-border/40 divide-border/40 divide-y overflow-hidden rounded-2xl border shadow-sm">
+        <SettingRow
+          label={t(
+            "pages.agent.tools.memory.backup_enabled",
+            "Enable Memory Backup",
+          )}
+          description={t(
+            "pages.agent.tools.memory.backup_enabled_hint",
+            "Periodically archive the memory directory and keep a snapshot before every memory write.",
+          )}
+        >
+          <Switch
+            checked={draft.backup.enabled}
+            onCheckedChange={(checked) => patchBackup({ enabled: checked })}
+            className="data-[state=checked]:shadow-xs"
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t("pages.agent.tools.memory.backup_dir", "Backup Directory")}
+          description={t(
+            "pages.agent.tools.memory.backup_dir_hint",
+            "Where archives are stored. Leave empty for ~/.picoclaw/backups (outside the workspace).",
+          )}
+        >
+          <Input
+            className="bg-muted/40 hover:bg-muted/60 focus-visible:bg-background focus-visible:border-border/80 focus-visible:ring-foreground/5 w-full rounded-xl border-transparent shadow-none transition-all duration-300 sm:w-64"
+            value={draft.backup.dir ?? ""}
+            onChange={(event) => patchBackup({ dir: event.target.value })}
+            placeholder={t(
+              "pages.agent.tools.memory.backup_dir_placeholder",
+              "~/.picoclaw/backups",
+            )}
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t(
+            "pages.agent.tools.memory.backup_interval_hours",
+            "Backup Interval (hours)",
+          )}
+          description={t(
+            "pages.agent.tools.memory.backup_interval_hours_hint",
+            "How often to create an archive while backups are enabled.",
+          )}
+        >
+          <NumberInput
+            value={draft.backup.interval_hours}
+            onChange={(value) => patchBackup({ interval_hours: value })}
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t(
+            "pages.agent.tools.memory.backup_keep",
+            "Archives To Keep",
+          )}
+          description={t(
+            "pages.agent.tools.memory.backup_keep_hint",
+            "How many archives to retain; older ones are pruned.",
+          )}
+        >
+          <NumberInput
+            value={draft.backup.keep}
+            onChange={(value) => patchBackup({ keep: value })}
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t(
+            "pages.agent.tools.memory.backup_drift_keep",
+            "Pre-Write Snapshots",
+          )}
+          description={t(
+            "pages.agent.tools.memory.backup_drift_keep_hint",
+            "How many per-file snapshots to keep before each memory write.",
+          )}
+        >
+          <NumberInput
+            value={draft.backup.drift_keep}
+            onChange={(value) => patchBackup({ drift_keep: value })}
           />
         </SettingRow>
       </div>

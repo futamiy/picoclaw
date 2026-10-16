@@ -39,6 +39,9 @@ func TestE2E_WebMemoryConfig_RoundTrip(t *testing.T) {
 		"daily_note_char_limit": 999,
 		"extract_enabled": true,
 		"extract_every_turns": 7,
+		"profile_enabled": true,
+		"profile_char_limit": 3210,
+		"backup": {"enabled": true, "dir": "/tmp/picoclaw-bk", "keep": 5, "interval_hours": 6, "drift_keep": 2},
 		"mem0": {"enabled": true, "base_url": "http://mem0.local", "user_id": "u9", "agent_id": "a9", "sync_every_turns": 3}
 	}`
 	req := httptest.NewRequest(http.MethodPut, "/api/tools/memory-config", bytes.NewBufferString(body))
@@ -64,6 +67,13 @@ func TestE2E_WebMemoryConfig_RoundTrip(t *testing.T) {
 	if m.Mem0.UserID != "u9" || m.Mem0.AgentID != "a9" || m.Mem0.EffectiveSyncEveryTurns() != 3 {
 		t.Fatalf("mem0 config not persisted: %+v", m.Mem0)
 	}
+	if !m.ProfileEnabled || m.EffectiveProfileCharLimit() != 3210 {
+		t.Fatalf("profile config not persisted: %+v", m)
+	}
+	if !m.Backup.Enabled || m.Backup.Dir != "/tmp/picoclaw-bk" || m.Backup.EffectiveKeep() != 5 ||
+		m.Backup.EffectiveIntervalHours() != 6 || m.Backup.EffectiveDriftKeep() != 2 {
+		t.Fatalf("backup config not persisted: %+v", m.Backup)
+	}
 
 	// Read it back through the API.
 	getReq := httptest.NewRequest(http.MethodGet, "/api/tools/memory-config", nil)
@@ -81,6 +91,12 @@ func TestE2E_WebMemoryConfig_RoundTrip(t *testing.T) {
 	}
 	if resp.LongTermCharLimit != 1234 || resp.Mem0.UserID != "u9" {
 		t.Fatalf("get response limits mismatch: %+v", resp)
+	}
+	if !resp.Backup.Enabled || resp.Backup.Dir != "/tmp/picoclaw-bk" || resp.Backup.Keep != 5 || resp.Backup.DriftKeep != 2 {
+		t.Fatalf("get response backup mismatch: %+v", resp.Backup)
+	}
+	if !resp.ProfileEnabled || resp.ProfileCharLimit != 3210 {
+		t.Fatalf("get response profile mismatch: %+v", resp)
 	}
 }
 

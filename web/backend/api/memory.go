@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sipeed/picoclaw/pkg/agent"
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/honcho"
 	"github.com/sipeed/picoclaw/pkg/mem0"
@@ -24,9 +25,22 @@ type memoryConfigResponse struct {
 	ExtractEnabled     bool                   `json:"extract_enabled"`
 	ExtractEveryTurns  int                    `json:"extract_every_turns"`
 	ExtractModel       string                 `json:"extract_model,omitempty"`
+	ProfileEnabled     bool                   `json:"profile_enabled"`
+	ProfileCharLimit   int                    `json:"profile_char_limit"`
+	Backup             memoryBackupConfig     `json:"backup"`
 	Honcho             honchoConfigResponse   `json:"honcho"`
 	Mem0               mem0ConfigResponse     `json:"mem0"`
 	RetainDB           retaindbConfigResponse `json:"retaindb"`
+}
+
+// memoryBackupConfig is the memory-backup settings shared by the GET response and
+// PUT request.
+type memoryBackupConfig struct {
+	Enabled       bool   `json:"enabled"`
+	Dir           string `json:"dir,omitempty"`
+	Keep          int    `json:"keep"`
+	IntervalHours int    `json:"interval_hours"`
+	DriftKeep     int    `json:"drift_keep"`
 }
 
 type honchoConfigResponse struct {
@@ -72,6 +86,9 @@ type memoryConfigRequest struct {
 	ExtractEnabled     bool                  `json:"extract_enabled"`
 	ExtractEveryTurns  int                   `json:"extract_every_turns"`
 	ExtractModel       string                `json:"extract_model"`
+	ProfileEnabled     bool                  `json:"profile_enabled"`
+	ProfileCharLimit   int                   `json:"profile_char_limit"`
+	Backup             memoryBackupConfig    `json:"backup"`
 	Honcho             honchoConfigRequest   `json:"honcho"`
 	Mem0               mem0ConfigRequest     `json:"mem0"`
 	RetainDB           retaindbConfigRequest `json:"retaindb"`
@@ -181,6 +198,21 @@ func (h *Handler) handleUpdateMemoryConfig(w http.ResponseWriter, r *http.Reques
 		cfg.Agents.Defaults.Memory.ExtractEveryTurns = req.ExtractEveryTurns
 	}
 	cfg.Agents.Defaults.Memory.ExtractModel = strings.TrimSpace(req.ExtractModel)
+	cfg.Agents.Defaults.Memory.ProfileEnabled = req.ProfileEnabled
+	if req.ProfileCharLimit > 0 {
+		cfg.Agents.Defaults.Memory.ProfileCharLimit = req.ProfileCharLimit
+	}
+	cfg.Agents.Defaults.Memory.Backup.Enabled = req.Backup.Enabled
+	cfg.Agents.Defaults.Memory.Backup.Dir = strings.TrimSpace(req.Backup.Dir)
+	if req.Backup.Keep > 0 {
+		cfg.Agents.Defaults.Memory.Backup.Keep = req.Backup.Keep
+	}
+	if req.Backup.IntervalHours > 0 {
+		cfg.Agents.Defaults.Memory.Backup.IntervalHours = req.Backup.IntervalHours
+	}
+	if req.Backup.DriftKeep > 0 {
+		cfg.Agents.Defaults.Memory.Backup.DriftKeep = req.Backup.DriftKeep
+	}
 
 	if provider := strings.ToLower(strings.TrimSpace(req.Provider)); provider != "" {
 		mem.Provider = normalizeMemoryProvider(provider)
@@ -459,6 +491,15 @@ func buildMemoryConfigResponse(cfg *config.Config) memoryConfigResponse {
 		ExtractEnabled:     m.ExtractEnabled,
 		ExtractEveryTurns:  m.EffectiveExtractEveryTurns(),
 		ExtractModel:       m.ExtractModel,
+		ProfileEnabled:     m.ProfileEnabled,
+		ProfileCharLimit:   m.EffectiveProfileCharLimit(),
+		Backup: memoryBackupConfig{
+			Enabled:       m.Backup.Enabled,
+			Dir:           m.Backup.Dir,
+			Keep:          m.Backup.EffectiveKeep(),
+			IntervalHours: m.Backup.EffectiveIntervalHours(),
+			DriftKeep:     m.Backup.EffectiveDriftKeep(),
+		},
 		Honcho: honchoConfigResponse{
 			Enabled:          m.Honcho.Enabled,
 			BaseURL:          m.Honcho.BaseURL,
@@ -546,4 +587,86 @@ func honchoPreview(messages []honcho.Message) string {
 		}
 	}
 	return strings.Join(parts, " | ")
+}
+
+// memoryBackupDir resolves the configured archive directory, falling back to the
+// default (~/.picoclaw/backups) when unset.
+func memoryBackupDir(cfg *config.Config) string {
+	if dir := strings.TrimSpace(cfg.Agents.Defaults.Memory.Backup.Dir); dir != "" {
+		return dir
+	}
+	return agent.DefaultMemoryArchiveDir()
+}
+
+func (h *Handler) handleListMemoryBackups(w http.ResponseWriter, r *http.Request) {
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+	dir := memoryBackupDir(cfg)
+	archives, err := agent.ListMemoryArchives(dir)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to list backups: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"dir": dir, "backups": archives})
+}
+
+func (h *Handler) handleCreateMemoryBackup(w http.ResponseWriter, r *http.Request) {
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+	var req struct {
+		IncludeConfig bool `json:"include_config"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req) // empty body is fine
+
+	mem := cfg.Agents.Defaults.Memory.Backup
+	path, err := agent.CreateMemoryArchive(
+		cfg.WorkspacePath(),
+		mem.Dir,
+		h.configPath,
+		req.IncludeConfig,
+		mem.EffectiveKeep(),
+	)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create backup: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": true, "path": path})
+}
+
+func (h *Handler) handleRestoreMemoryBackup(w http.ResponseWriter, r *http.Request) {
+	cfg, err := config.LoadConfig(h.configPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+	var req struct {
+		Path    string `json:"path"`
+		Confirm bool   `json:"confirm"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.Path) == "" {
+		http.Error(w, "path is required", http.StatusBadRequest)
+		return
+	}
+	if !req.Confirm {
+		http.Error(w, "restore overwrites current memory; set confirm=true to proceed", http.StatusBadRequest)
+		return
+	}
+	if err := agent.RestoreMemoryArchive(req.Path, cfg.WorkspacePath(), h.configPath); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to restore backup: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }

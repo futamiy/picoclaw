@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -30,33 +31,55 @@ var ErrMemoryFull = errors.New("memory limit exceeded")
 type MemoryOptions struct {
 	// LongTermCharLimit caps MEMORY.md size in runes. 0 disables enforcement.
 	LongTermCharLimit int
+	// ProfileEnabled controls whether the bounded user profile (PROFILE.md) is
+	// written and injected. Distinct from the workspace USER.md definition file.
+	ProfileEnabled bool
+	// ProfileCharLimit caps PROFILE.md size in runes. 0 disables enforcement.
+	ProfileCharLimit int
 	// DailyNotesEnabled controls whether daily notes are written and injected.
 	DailyNotesEnabled bool
 	// DailyNoteCharLimit caps each daily note file size in runes. 0 disables enforcement.
 	DailyNoteCharLimit int
 	// DailyNotesDays is how many recent days of notes are injected.
 	DailyNotesDays int
+	// DriftKeep is how many <file>.bak.<unix_ts> snapshots to retain per rewritten
+	// file. 0 disables drift backups.
+	DriftKeep int
 }
 
 // DefaultMemoryOptions mirrors the config defaults, used when no options are given.
 func DefaultMemoryOptions() MemoryOptions {
 	return MemoryOptions{
 		LongTermCharLimit:  config.DefaultMemoryLongTermCharLimit,
+		ProfileEnabled:     true,
+		ProfileCharLimit:   config.DefaultMemoryProfileCharLimit,
 		DailyNotesEnabled:  true,
 		DailyNoteCharLimit: config.DefaultMemoryDailyNoteCharLimit,
 		DailyNotesDays:     config.DefaultMemoryDailyNotesDays,
+		DriftKeep:          0, // backups are opt-in (see MemoryBackupConfig.Enabled)
 	}
 }
 
+// Memory targets: which bounded file a memory mutation/read applies to.
+const (
+	// TargetMemory is the long-term memory file (MEMORY.md).
+	TargetMemory = "memory"
+	// TargetProfile is the bounded user profile file (PROFILE.md).
+	TargetProfile = "profile"
+)
+
 // MemoryStore manages persistent memory for the agent.
 // - Long-term memory: memory/MEMORY.md
+// - User profile: memory/PROFILE.md
 // - Daily notes: memory/YYYYMM/YYYYMMDD.md
 type MemoryStore struct {
-	workspace  string
-	memoryDir  string
-	memoryFile string
-	opts       MemoryOptions
-	mu         sync.Mutex // guards read-modify-write ops (tool + async extractor)
+	workspace   string
+	memoryDir   string
+	memoryFile  string
+	profileFile string
+	opts        MemoryOptions
+	driftKeep   int        // retained <file>.bak.<ts> snapshots per file; 0 disables
+	mu          sync.Mutex // guards read-modify-write ops (tool + async extractor)
 
 	overLimitWarn sync.Once // fires once per store when MEMORY.md is found over-limit
 }
@@ -75,20 +98,79 @@ func NewMemoryStoreWithOptions(workspace string, opts MemoryOptions) *MemoryStor
 	}
 	memoryDir := filepath.Join(workspace, "memory")
 	memoryFile := filepath.Join(memoryDir, "MEMORY.md")
+	profileFile := filepath.Join(memoryDir, "PROFILE.md")
 
 	// Ensure memory directory exists
 	os.MkdirAll(memoryDir, 0o755)
 
-	return &MemoryStore{
-		workspace:  workspace,
-		memoryDir:  memoryDir,
-		memoryFile: memoryFile,
-		opts:       opts,
+	driftKeep := 0
+	if opts.DriftKeep > 0 {
+		driftKeep = opts.DriftKeep
 	}
+
+	return &MemoryStore{
+		workspace:   workspace,
+		memoryDir:   memoryDir,
+		memoryFile:  memoryFile,
+		profileFile: profileFile,
+		opts:        opts,
+		driftKeep:   driftKeep,
+	}
+}
+
+// snapshotDrift copies prev to <path>.bak.<unix_ts> and prunes all but the
+// newest driftKeep snapshots. Best-effort: a failed backup never blocks the write
+// it protects.
+// ponytail: per-file timestamp pruning (glob + sort), not an index; the count is
+// tiny and the glob is cheap.
+func (ms *MemoryStore) snapshotDrift(path string, prev []byte) {
+	if ms.driftKeep <= 0 || len(prev) == 0 {
+		return
+	}
+	dir, base := filepath.Split(path)
+	matches, _ := filepath.Glob(filepath.Join(dir, base+".bak.*"))
+	// Only prune once we would exceed the limit, so the fresh snapshot is never
+	// immediately deleted by its own pruning.
+	if len(matches) >= ms.driftKeep {
+		sort.Strings(matches)
+		for _, old := range matches[:len(matches)-ms.driftKeep+1] {
+			os.Remove(old)
+		}
+	}
+	// Nanosecond resolution so rapid successive writes do not collide on one name.
+	_ = os.WriteFile(fmt.Sprintf("%s.bak.%d", path, time.Now().UnixNano()), prev, 0o600)
+}
+
+// targetFile returns the file path and rune limit for a memory target.
+func (ms *MemoryStore) targetFile(target string) (string, int) {
+	if target == TargetProfile {
+		return ms.profileFile, ms.opts.ProfileCharLimit
+	}
+	return ms.memoryFile, ms.opts.LongTermCharLimit
+}
+
+// TargetEnabled reports whether a target is enabled (profile can be off).
+func (ms *MemoryStore) TargetEnabled(target string) bool {
+	if target == TargetProfile {
+		return ms.opts.ProfileEnabled
+	}
+	return true
+}
+
+// CharLimit returns the configured rune cap for a target (0 = unlimited).
+func (ms *MemoryStore) CharLimit(target string) int {
+	_, limit := ms.targetFile(target)
+	return limit
 }
 
 // LongTermCharLimit returns the configured MEMORY.md cap (0 = unlimited).
 func (ms *MemoryStore) LongTermCharLimit() int { return ms.opts.LongTermCharLimit }
+
+// ProfileCharLimit returns the configured PROFILE.md cap (0 = unlimited).
+func (ms *MemoryStore) ProfileCharLimit() int { return ms.opts.ProfileCharLimit }
+
+// ProfileEnabled reports whether the bounded user profile is written and injected.
+func (ms *MemoryStore) ProfileEnabled() bool { return ms.opts.ProfileEnabled }
 
 // DailyNotesEnabled reports whether daily notes are written and injected.
 func (ms *MemoryStore) DailyNotesEnabled() bool { return ms.opts.DailyNotesEnabled }
@@ -113,34 +195,39 @@ func (ms *MemoryStore) recentDailyNotePaths(days int) []string {
 	return paths
 }
 
-// ReadLongTerm reads the long-term memory (MEMORY.md).
+// ReadTarget reads a memory target file (MEMORY.md or PROFILE.md).
 // Returns empty string if the file doesn't exist.
-func (ms *MemoryStore) ReadLongTerm() string {
-	if data, err := os.ReadFile(ms.memoryFile); err == nil {
+func (ms *MemoryStore) ReadTarget(target string) string {
+	path, _ := ms.targetFile(target)
+	if data, err := os.ReadFile(path); err == nil {
 		return string(data)
 	}
 	return ""
 }
 
-// WriteLongTerm writes content to the long-term memory file (MEMORY.md).
+// WriteTarget writes content to a target file after enforcing its limit.
 // Returns ErrMemoryFull when the content exceeds the configured limit.
-func (ms *MemoryStore) WriteLongTerm(content string) error {
+func (ms *MemoryStore) WriteTarget(target, content string) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
-	return ms.writeLongTermUnlocked(content)
+	return ms.writeTargetUnlocked(target, content)
 }
 
-func (ms *MemoryStore) writeLongTermUnlocked(content string) error {
-	if err := ms.checkLimit(content, ms.opts.LongTermCharLimit); err != nil {
+func (ms *MemoryStore) writeTargetUnlocked(target, content string) error {
+	path, limit := ms.targetFile(target)
+	if err := ms.checkLimit(content, limit); err != nil {
 		return err
+	}
+	if prev, err := os.ReadFile(path); err == nil {
+		ms.snapshotDrift(path, prev)
 	}
 	// Use unified atomic write utility with explicit sync for flash storage reliability.
 	// Using 0o600 (owner read/write only) for secure default permissions.
-	return fileutil.WriteFileAtomic(ms.memoryFile, []byte(content), 0o600)
+	return fileutil.WriteFileAtomic(path, []byte(content), 0o600)
 }
 
-// AddLongTerm appends an entry to MEMORY.md. Duplicate entries are ignored.
-func (ms *MemoryStore) AddLongTerm(entry string) error {
+// AddEntry appends an entry to a target. Duplicate entries are ignored.
+func (ms *MemoryStore) AddEntry(target, entry string) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 
@@ -148,30 +235,30 @@ func (ms *MemoryStore) AddLongTerm(entry string) error {
 	if entry == "" {
 		return fmt.Errorf("entry is required")
 	}
-	updated, changed := memoryApplyAdd(ms.ReadLongTerm(), entry)
+	updated, changed := memoryApplyAdd(ms.ReadTarget(target), entry)
 	if !changed {
 		return nil
 	}
-	return ms.writeLongTermUnlocked(updated)
+	return ms.writeTargetUnlocked(target, updated)
 }
 
-// ReplaceLongTerm replaces oldText with newText in MEMORY.md.
-func (ms *MemoryStore) ReplaceLongTerm(oldText, newText string) error {
+// ReplaceEntry replaces oldText with newText in a target.
+func (ms *MemoryStore) ReplaceEntry(target, oldText, newText string) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 
 	if oldText == "" {
 		return fmt.Errorf("old_text is required")
 	}
-	updated, err := memoryApplyReplace(ms.ReadLongTerm(), oldText, newText)
+	updated, err := memoryApplyReplace(ms.ReadTarget(target), oldText, newText)
 	if err != nil {
 		return err
 	}
-	return ms.writeLongTermUnlocked(updated)
+	return ms.writeTargetUnlocked(target, updated)
 }
 
-// RemoveLongTerm removes the first line containing substr from MEMORY.md.
-func (ms *MemoryStore) RemoveLongTerm(substr string) error {
+// RemoveEntry removes the first line containing substr from a target.
+func (ms *MemoryStore) RemoveEntry(target, substr string) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 
@@ -179,7 +266,7 @@ func (ms *MemoryStore) RemoveLongTerm(substr string) error {
 	if substr == "" {
 		return fmt.Errorf("text is required")
 	}
-	current := ms.ReadLongTerm()
+	current := ms.ReadTarget(target)
 	if current == "" {
 		return nil
 	}
@@ -187,19 +274,19 @@ func (ms *MemoryStore) RemoveLongTerm(substr string) error {
 	if !removed {
 		return fmt.Errorf("no memory entry matched %q", substr)
 	}
-	return ms.writeLongTermUnlocked(updated)
+	return ms.writeTargetUnlocked(target, updated)
 }
 
-// ApplyOperations applies a batch of long-term memory mutations atomically: ops
-// run in order against a working copy and the result is written once. The limit
-// is checked only on the FINAL content, so a batch can free room (remove/replace)
+// ApplyOperations applies a batch of mutations to a target atomically: ops run in
+// order against a working copy and the result is written once. The limit is
+// checked only on the FINAL content, so a batch can free room (remove/replace)
 // and add new entries even when an intermediate size would exceed the cap. Any
 // invalid op aborts the whole batch with nothing written.
-func (ms *MemoryStore) ApplyOperations(ops []memorytool.Operation) error {
+func (ms *MemoryStore) ApplyOperations(target string, ops []memorytool.Operation) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 
-	working := ms.ReadLongTerm()
+	working := ms.ReadTarget(target)
 	for _, op := range ops {
 		switch strings.ToLower(strings.TrimSpace(op.Op)) {
 		case "add":
@@ -231,7 +318,28 @@ func (ms *MemoryStore) ApplyOperations(ops []memorytool.Operation) error {
 			return fmt.Errorf("unknown op %q; expected add, replace or remove", op.Op)
 		}
 	}
-	return ms.writeLongTermUnlocked(working)
+	return ms.writeTargetUnlocked(target, working)
+}
+
+// ReadLongTerm reads the long-term memory (MEMORY.md). Empty if missing.
+func (ms *MemoryStore) ReadLongTerm() string { return ms.ReadTarget(TargetMemory) }
+
+// WriteLongTerm writes content to MEMORY.md.
+func (ms *MemoryStore) WriteLongTerm(content string) error {
+	return ms.WriteTarget(TargetMemory, content)
+}
+
+// AddLongTerm appends an entry to MEMORY.md. Duplicate entries are ignored.
+func (ms *MemoryStore) AddLongTerm(entry string) error { return ms.AddEntry(TargetMemory, entry) }
+
+// ReplaceLongTerm replaces oldText with newText in MEMORY.md.
+func (ms *MemoryStore) ReplaceLongTerm(oldText, newText string) error {
+	return ms.ReplaceEntry(TargetMemory, oldText, newText)
+}
+
+// RemoveLongTerm removes the first line containing substr from MEMORY.md.
+func (ms *MemoryStore) RemoveLongTerm(substr string) error {
+	return ms.RemoveEntry(TargetMemory, substr)
 }
 
 // memoryApplyAdd appends entry to current unless it is already present (dedup).
@@ -322,6 +430,9 @@ func (ms *MemoryStore) appendTodayUnlocked(content string) error {
 		return err
 	}
 
+	if existingContent != "" {
+		ms.snapshotDrift(todayFile, []byte(existingContent))
+	}
 	// Use unified atomic write utility with explicit sync for flash storage reliability.
 	return fileutil.WriteFileAtomic(todayFile, []byte(newContent), 0o600)
 }
@@ -351,7 +462,7 @@ func (ms *MemoryStore) GetRecentDailyNotes(days int) string {
 }
 
 // GetMemoryContext returns formatted memory context for the agent prompt.
-// Includes long-term memory and recent daily notes.
+// Includes the user profile, long-term memory and recent daily notes.
 func (ms *MemoryStore) GetMemoryContext() string {
 	longTerm := ms.ReadLongTerm()
 	used := utf8.RuneCountInString(longTerm)
@@ -371,18 +482,41 @@ func (ms *MemoryStore) GetMemoryContext() string {
 		longTerm = truncateRunes(longTerm, limit)
 	}
 
+	profile := ""
+	profileUsed := 0
+	profileLimit := ms.opts.ProfileCharLimit
+	if ms.opts.ProfileEnabled {
+		profile = ms.ReadTarget(TargetProfile)
+		profileUsed = utf8.RuneCountInString(profile)
+		if profileLimit > 0 {
+			profile = truncateRunes(profile, profileLimit)
+		}
+	}
+
 	recentNotes := ""
 	if ms.opts.DailyNotesEnabled {
 		recentNotes = ms.GetRecentDailyNotes(ms.opts.DailyNotesDays)
 	}
 
-	if longTerm == "" && recentNotes == "" {
+	if longTerm == "" && profile == "" && recentNotes == "" {
 		return ""
 	}
 
 	var sb strings.Builder
 
+	if profile != "" {
+		sb.WriteString("## User Profile")
+		if profileLimit > 0 {
+			fmt.Fprintf(&sb, " [%d/%d runes]", profileUsed, profileLimit)
+		}
+		sb.WriteString("\n\n")
+		sb.WriteString(profile)
+	}
+
 	if longTerm != "" {
+		if sb.Len() > 0 {
+			sb.WriteString("\n\n---\n\n")
+		}
 		sb.WriteString("## Long-term Memory")
 		if limit > 0 {
 			fmt.Fprintf(&sb, " [%d/%d runes]", used, limit)
@@ -392,7 +526,7 @@ func (ms *MemoryStore) GetMemoryContext() string {
 	}
 
 	if recentNotes != "" {
-		if longTerm != "" {
+		if sb.Len() > 0 {
 			sb.WriteString("\n\n---\n\n")
 		}
 		sb.WriteString("## Recent Daily Notes\n\n")

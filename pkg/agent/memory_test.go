@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -140,7 +142,7 @@ func TestMemoryStore_ApplyOperationsChecksFinalSize(t *testing.T) {
 	}
 	// add-alone would overflow (52 > 45); remove-first makes it fit (40). The batch
 	// must be judged on the FINAL size, not the intermediate add-first state.
-	err := ms.ApplyOperations([]memorytool.Operation{
+	err := ms.ApplyOperations(TargetMemory, []memorytool.Operation{
 		{Op: "add", Content: "prefers open-source tools"},
 		{Op: "remove", Text: "stale entry"},
 	})
@@ -159,7 +161,7 @@ func TestMemoryStore_ApplyOperationsRollsBackOnInvalidOp(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	before := ms.ReadLongTerm()
-	err := ms.ApplyOperations([]memorytool.Operation{
+	err := ms.ApplyOperations(TargetMemory, []memorytool.Operation{
 		{Op: "add", Content: "new entry"},
 		{Op: "remove", Text: "does-not-exist"},
 	})
@@ -168,6 +170,27 @@ func TestMemoryStore_ApplyOperationsRollsBackOnInvalidOp(t *testing.T) {
 	}
 	if ms.ReadLongTerm() != before {
 		t.Fatalf("failed batch must write nothing, got %q", ms.ReadLongTerm())
+	}
+}
+
+func TestMemoryStore_DriftBackupsPruned(t *testing.T) {
+	dir := t.TempDir()
+	ms := NewMemoryStoreWithOptions(dir, MemoryOptions{LongTermCharLimit: 10000, DriftKeep: 2})
+	for i := 0; i < 4; i++ {
+		if err := ms.WriteLongTerm(fmt.Sprintf("v%d\n", i)); err != nil {
+			t.Fatalf("write %d: %v", i, err)
+		}
+	}
+	baks, _ := filepath.Glob(filepath.Join(dir, "memory", "MEMORY.md.bak.*"))
+	if len(baks) != 2 {
+		t.Fatalf("want 2 retained drift snapshots, got %d: %v", len(baks), baks)
+	}
+	sort.Strings(baks)
+	if b, _ := os.ReadFile(baks[len(baks)-1]); string(b) != "v2\n" {
+		t.Fatalf("newest drift snapshot should hold the previous content v2, got %q", b)
+	}
+	if cur := ms.ReadLongTerm(); cur != "v3\n" {
+		t.Fatalf("current content = %q, want v3", cur)
 	}
 }
 

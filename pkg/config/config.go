@@ -442,6 +442,12 @@ type MemoryConfig struct {
 	// LongTermCharLimit caps MEMORY.md size; writes that exceed it are rejected
 	// so the agent must condense first.
 	LongTermCharLimit int `json:"long_term_char_limit" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_LONG_TERM_CHAR_LIMIT"`
+	// ProfileEnabled enables the bounded user-profile memory (PROFILE.md),
+	// distinct from the workspace USER.md definition file.
+	ProfileEnabled bool `json:"profile_enabled" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_PROFILE_ENABLED"`
+	// ProfileCharLimit caps PROFILE.md size in runes; writes that exceed it are
+	// rejected. 0 uses the default.
+	ProfileCharLimit int `json:"profile_char_limit" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_PROFILE_CHAR_LIMIT"`
 	// DailyNotesEnabled controls whether dated daily notes are written/read.
 	DailyNotesEnabled bool `json:"daily_notes_enabled" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_DAILY_NOTES_ENABLED"`
 	// DailyNotesDays is how many recent days of notes are injected into the prompt.
@@ -462,6 +468,8 @@ type MemoryConfig struct {
 	Mem0 Mem0MemoryConfig `json:"mem0,omitempty"`
 	// RetainDB is an optional external memory sink backed by a RetainDB server.
 	RetainDB RetainDBMemoryConfig `json:"retaindb,omitempty"`
+	// Backup configures local memory backups (drift .bak files and archive zips).
+	Backup MemoryBackupConfig `json:"backup,omitempty"`
 }
 
 // HonchoMemoryConfig configures pushing conversation transcripts to a Honcho
@@ -534,12 +542,41 @@ type RetainDBMemoryConfig struct {
 	SyncEveryTurns int `json:"sync_every_turns,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_RETAINDB_SYNC_EVERY_TURNS"`
 }
 
+// MemoryBackupConfig configures local backups of the memory directory.
+//
+// Two layers exist:
+//   - a drift backup: whenever a memory file is rewritten, the previous content
+//     is copied to <file>.bak.<unix_ts> (bounded to remember the last few).
+//   - an archive: an on-demand (or scheduled) zip of the whole memory directory,
+//     optionally including config.json.
+//
+// Automatic backups are OFF by default so they cannot silently grow the disk;
+// set Enabled to turn on drift snapshots and scheduled archives.
+type MemoryBackupConfig struct {
+	// Enabled turns on the memory-backup feature: it gates both per-write drift
+	// snapshots (.bak.<ts> files) and scheduled archive backups. Manual backups
+	// (CLI or web) always work regardless. Off by default.
+	Enabled bool `json:"enabled" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_BACKUP_ENABLED"`
+	// Dir is where archives are written. Empty uses ~/.picoclaw/backups.
+	Dir string `json:"dir,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_BACKUP_DIR"`
+	// Keep is how many archives to retain (oldest pruned). 0 uses the default.
+	Keep int `json:"keep,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_BACKUP_KEEP"`
+	// IntervalHours is how often to archive when Enabled (min 1). 0 uses the default.
+	IntervalHours int `json:"interval_hours,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_BACKUP_INTERVAL_HOURS"`
+	// DriftKeep is how many <file>.bak.<ts> snapshots to retain per file (min 1). 0 uses the default.
+	DriftKeep int `json:"drift_keep,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_BACKUP_DRIFT_KEEP"`
+}
+
 const (
 	DefaultMemoryLongTermCharLimit  = 2200
+	DefaultMemoryProfileCharLimit   = 1375
 	DefaultMemoryDailyNoteCharLimit = 2200
 	DefaultMemoryDailyNotesDays     = 3
 	DefaultMemoryExtractEveryTurns  = 10
 	DefaultMemorySyncEveryTurns     = 10
+	DefaultMemoryBackupKeep         = 20
+	DefaultMemoryBackupIntervalHour = 24
+	DefaultMemoryBackupDriftKeep    = 3
 	DefaultHonchoBaseURL            = "https://api.honcho.dev"
 	DefaultHonchoUserPeerID         = "user"
 	DefaultMem0BaseURL              = "https://api.mem0.ai"
@@ -583,6 +620,14 @@ func (m MemoryConfig) EffectiveLongTermCharLimit() int {
 	return DefaultMemoryLongTermCharLimit
 }
 
+// EffectiveProfileCharLimit returns the configured PROFILE.md cap or the default.
+func (m MemoryConfig) EffectiveProfileCharLimit() int {
+	if m.ProfileCharLimit > 0 {
+		return m.ProfileCharLimit
+	}
+	return DefaultMemoryProfileCharLimit
+}
+
 // EffectiveDailyNoteCharLimit returns the configured cap or the default.
 func (m MemoryConfig) EffectiveDailyNoteCharLimit() int {
 	if m.DailyNoteCharLimit > 0 {
@@ -605,6 +650,30 @@ func (m MemoryConfig) EffectiveExtractEveryTurns() int {
 		return m.ExtractEveryTurns
 	}
 	return DefaultMemoryExtractEveryTurns
+}
+
+// EffectiveBackupKeep returns the configured archive retention or the default.
+func (b MemoryBackupConfig) EffectiveKeep() int {
+	if b.Keep > 0 {
+		return b.Keep
+	}
+	return DefaultMemoryBackupKeep
+}
+
+// EffectiveIntervalHours returns the configured archive interval or the default.
+func (b MemoryBackupConfig) EffectiveIntervalHours() int {
+	if b.IntervalHours > 0 {
+		return b.IntervalHours
+	}
+	return DefaultMemoryBackupIntervalHour
+}
+
+// EffectiveDriftKeep returns the configured drift-backup retention or the default.
+func (b MemoryBackupConfig) EffectiveDriftKeep() int {
+	if b.DriftKeep > 0 {
+		return b.DriftKeep
+	}
+	return DefaultMemoryBackupDriftKeep
 }
 
 // EffectiveBaseURL returns the configured Honcho server or the default.

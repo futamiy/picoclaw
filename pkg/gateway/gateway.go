@@ -65,16 +65,17 @@ const (
 )
 
 type services struct {
-	CronService      *cron.CronService
-	HeartbeatService *heartbeat.HeartbeatService
-	MediaStore       media.MediaStore
-	ChannelManager   *channels.Manager
-	DeviceService    *devices.Service
-	HealthServer     *health.Server
-	VoiceAgentCancel context.CancelFunc
-	manualReloadChan chan struct{}
-	reloading        atomic.Bool
-	authToken        string
+	CronService         *cron.CronService
+	HeartbeatService    *heartbeat.HeartbeatService
+	MemoryBackupService *agent.MemoryBackupService
+	MediaStore          media.MediaStore
+	ChannelManager      *channels.Manager
+	DeviceService       *devices.Service
+	HealthServer        *health.Server
+	VoiceAgentCancel    context.CancelFunc
+	manualReloadChan    chan struct{}
+	reloading           atomic.Bool
+	authToken           string
 }
 
 type startupBlockedProvider struct {
@@ -403,6 +404,27 @@ func createStartupProvider(
 	return provider, modelID, nil
 }
 
+// startMemoryBackupService starts the scheduled memory-archive ticker. It is a
+// no-op when backups are disabled in config.
+func startMemoryBackupService(runningServices *services, cfg *config.Config) error {
+	bk := cfg.Agents.Defaults.Memory.Backup
+	runningServices.MemoryBackupService = agent.NewMemoryBackupService(
+		cfg.WorkspacePath(),
+		"", // scheduled archives exclude config.json, so no config path needed
+		bk.Dir,
+		bk.Enabled,
+		time.Duration(bk.EffectiveIntervalHours())*time.Hour,
+		bk.EffectiveKeep(),
+	)
+	if err := runningServices.MemoryBackupService.Start(); err != nil {
+		return fmt.Errorf("error starting memory backup service: %w", err)
+	}
+	if bk.Enabled {
+		fmt.Println("✓ Memory backup service started")
+	}
+	return nil
+}
+
 func setupAndStartServices(
 	cfg *config.Config,
 	agentLoop *agent.AgentLoop,
@@ -441,6 +463,10 @@ func setupAndStartServices(
 		return nil, fmt.Errorf("error starting heartbeat service: %w", err)
 	}
 	fmt.Println("✓ Heartbeat service started")
+
+	if err = startMemoryBackupService(runningServices, cfg); err != nil {
+		return nil, err
+	}
 
 	runningServices.MediaStore = media.NewFileMediaStoreWithCleanup(media.MediaCleanerConfig{
 		Enabled:  cfg.Tools.MediaCleanup.Enabled,
@@ -548,6 +574,9 @@ func stopAndCleanupServices(runningServices *services, shutdownTimeout time.Dura
 	}
 	if runningServices.HeartbeatService != nil {
 		runningServices.HeartbeatService.Stop()
+	}
+	if runningServices.MemoryBackupService != nil {
+		runningServices.MemoryBackupService.Stop()
 	}
 	if runningServices.CronService != nil {
 		runningServices.CronService.Stop()
@@ -689,6 +718,13 @@ func restartServices(
 		return fmt.Errorf("error restarting heartbeat service: %w", err)
 	}
 	fmt.Println("  ✓ Heartbeat service restarted")
+
+	if runningServices.MemoryBackupService != nil {
+		runningServices.MemoryBackupService.Stop()
+	}
+	if err = startMemoryBackupService(runningServices, cfg); err != nil {
+		return err
+	}
 
 	runningServices.MediaStore = media.NewFileMediaStoreWithCleanup(media.MediaCleanerConfig{
 		Enabled:  cfg.Tools.MediaCleanup.Enabled,

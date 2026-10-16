@@ -178,6 +178,12 @@ func NewAgentInstance(
 	sessions := initSessionStore(sessionsDir)
 
 	mcpDiscoveryActive := agentHasDiscoverableMCPServers(cfg, agentMCPServerAllowlist)
+	// Drift snapshots are part of the memory-backup feature: they only run when
+	// backups are enabled, so the toggle governs all automatic backup behavior.
+	driftKeep := 0
+	if cfg.Agents.Defaults.Memory.Backup.Enabled {
+		driftKeep = cfg.Agents.Defaults.Memory.Backup.EffectiveDriftKeep()
+	}
 	contextBuilder := NewContextBuilder(workspace).
 		WithToolDiscovery(
 			mcpDiscoveryActive && cfg.Tools.MCP.Discovery.UseBM25,
@@ -189,6 +195,9 @@ func NewAgentInstance(
 			DailyNotesEnabled:  cfg.Agents.Defaults.Memory.DailyNotesEnabled,
 			DailyNoteCharLimit: cfg.Agents.Defaults.Memory.EffectiveDailyNoteCharLimit(),
 			DailyNotesDays:     cfg.Agents.Defaults.Memory.EffectiveDailyNotesDays(),
+			ProfileEnabled:     cfg.Agents.Defaults.Memory.ProfileEnabled,
+			ProfileCharLimit:   cfg.Agents.Defaults.Memory.EffectiveProfileCharLimit(),
+			DriftKeep:          driftKeep,
 		})
 
 	if cfg.Agents.Defaults.Memory.Enabled && cfg.Tools.IsToolEnabled("memory") {

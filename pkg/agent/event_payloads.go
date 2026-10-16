@@ -120,7 +120,9 @@ type MemoryExtractPayload struct {
 	Replacements int
 	Removals     int
 	Notes        int
-	ScannedTurns int
+	// ProfileAdditions counts entries added to the user profile (PROFILE.md).
+	ProfileAdditions int
+	ScannedTurns     int
 }
 
 // HonchoSyncedPayload describes a successful Honcho transcript sync.

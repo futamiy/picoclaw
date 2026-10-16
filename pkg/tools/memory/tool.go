@@ -4,7 +4,7 @@
 // Copyright (c) 2026 PicoClaw contributors
 
 // Package memorytools provides the agent-facing `memory` tool for managing
-// bounded persistent memory (MEMORY.md and daily notes).
+// bounded persistent memory (MEMORY.md, PROFILE.md and daily notes).
 package memorytools
 
 import (
@@ -25,16 +25,25 @@ type Operation struct {
 	Text    string `json:"text"`     // remove
 }
 
+// Memory targets select which bounded file a mutation applies to.
+const (
+	// TargetMemory is the long-term memory file (MEMORY.md).
+	TargetMemory = "memory"
+	// TargetProfile is the bounded user profile file (PROFILE.md).
+	TargetProfile = "profile"
+)
+
 // Store is the subset of the memory store the tool needs. It is satisfied by
 // agent.MemoryStore without importing the agent package (avoids an import cycle).
 type Store interface {
-	ReadLongTerm() string
-	AddLongTerm(entry string) error
-	ReplaceLongTerm(oldText, newText string) error
-	RemoveLongTerm(substr string) error
-	ApplyOperations(ops []Operation) error
+	ReadTarget(target string) string
+	AddEntry(target, entry string) error
+	ReplaceEntry(target, oldText, newText string) error
+	RemoveEntry(target, substr string) error
+	ApplyOperations(target string, ops []Operation) error
 	AppendToday(content string) error
-	LongTermCharLimit() int
+	CharLimit(target string) int
+	TargetEnabled(target string) bool
 	DailyNotesEnabled() bool
 }
 
@@ -58,7 +67,8 @@ func NewMemoryTool(store Store) *MemoryTool {
 func (t *MemoryTool) Name() string { return "memory" }
 
 func (t *MemoryTool) Description() string {
-	limit := t.store.LongTermCharLimit()
+	limit := t.store.CharLimit(TargetMemory)
+	profileLimit := t.store.CharLimit(TargetProfile)
 	desc := "Manage your persistent long-term memory (MEMORY.md), injected into " +
 		"your system prompt in future sessions. Actions: add (append an entry), " +
 		"replace (old_text -> new_text), remove (delete the first entry containing text), " +
@@ -66,10 +76,15 @@ func (t *MemoryTool) Description() string {
 	if t.store.DailyNotesEnabled() {
 		desc += ", note (append to today's dated daily note, for time-stamped context)"
 	}
-	desc += ". Pass several mutations as `operations` to apply them atomically in one call."
+	desc += ". Pass `target` = \"profile\" to manage your user profile (PROFILE.md, " +
+		"durable facts about the human) instead. " +
+		"Pass several mutations as `operations` to apply them atomically in one call."
 	if limit > 0 {
 		desc += " Long-term memory is a scarce resource, capped at a limited size; " +
 			"condense or remove stale entries when it is full."
+	}
+	if profileLimit > 0 {
+		desc += " Keep the profile small and factual too."
 	}
 	desc += " Store durable, cross-session facts only (preferences, decisions, recurring context). " +
 		"Ephemeral task state belongs in the conversation; task-specific procedures belong in a skill."
@@ -84,6 +99,11 @@ func (t *MemoryTool) Parameters() map[string]any {
 				"type":        "string",
 				"enum":        []string{"add", "replace", "remove", "read", "note"},
 				"description": "The single memory operation to perform (ignored when operations is given)",
+			},
+			"target": map[string]any{
+				"type":        "string",
+				"enum":        []string{TargetMemory, TargetProfile},
+				"description": "Which memory to edit: \"memory\" (MEMORY.md, default) or \"profile\" (PROFILE.md, facts about the user)",
 			},
 			"operations": map[string]any{
 				"type": "array",
@@ -150,12 +170,34 @@ func (t *MemoryTool) ok(msg string) *toolshared.ToolResult {
 	return toolshared.SilentResult(msg)
 }
 
+// normalizeTarget maps the `target` arg to a known target, defaulting to memory.
+func normalizeTarget(v any) (string, bool) {
+	s, _ := v.(string)
+	s = strings.ToLower(strings.TrimSpace(s))
+	switch s {
+	case "":
+		return TargetMemory, true
+	case TargetMemory, TargetProfile:
+		return s, true
+	default:
+		return "", false
+	}
+}
+
 func (t *MemoryTool) Execute(_ context.Context, args map[string]any) *toolshared.ToolResult {
+	target, okTarget := normalizeTarget(args["target"])
+	if !okTarget {
+		return t.fail("target must be \"memory\" or \"profile\"")
+	}
+	if !t.store.TargetEnabled(target) {
+		return t.fail("profile memory is disabled; set agents.defaults.memory.profile_enabled to use target=\"profile\"")
+	}
+
 	if ops := parseOperations(args["operations"]); len(ops) > 0 {
-		if err := t.store.ApplyOperations(ops); err != nil {
+		if err := t.store.ApplyOperations(target, ops); err != nil {
 			return t.fail(err.Error())
 		}
-		return t.ok(fmt.Sprintf("Applied %d memory operations atomically.", len(ops)))
+		return t.ok(fmt.Sprintf("Applied %d memory operations atomically to %s.", len(ops), target))
 	}
 
 	action, _ := args["action"].(string)
@@ -167,10 +209,10 @@ func (t *MemoryTool) Execute(_ context.Context, args map[string]any) *toolshared
 		if strings.TrimSpace(content) == "" {
 			return t.fail("content is required for action=add")
 		}
-		if err := t.store.AddLongTerm(content); err != nil {
+		if err := t.store.AddEntry(target, content); err != nil {
 			return t.fail(err.Error())
 		}
-		return t.ok("Memory entry added.")
+		return t.ok(fmt.Sprintf("Entry added to %s.", target))
 
 	case "replace":
 		oldText, _ := args["old_text"].(string)
@@ -178,25 +220,25 @@ func (t *MemoryTool) Execute(_ context.Context, args map[string]any) *toolshared
 		if oldText == "" {
 			return t.fail("old_text is required for action=replace")
 		}
-		if err := t.store.ReplaceLongTerm(oldText, newText); err != nil {
+		if err := t.store.ReplaceEntry(target, oldText, newText); err != nil {
 			return t.fail(err.Error())
 		}
-		return t.ok("Memory entry replaced.")
+		return t.ok(fmt.Sprintf("Entry replaced in %s.", target))
 
 	case "remove":
 		text, _ := args["text"].(string)
 		if text == "" {
 			return t.fail("text is required for action=remove")
 		}
-		if err := t.store.RemoveLongTerm(text); err != nil {
+		if err := t.store.RemoveEntry(target, text); err != nil {
 			return t.fail(err.Error())
 		}
-		return t.ok("Memory entry removed.")
+		return t.ok(fmt.Sprintf("Entry removed from %s.", target))
 
 	case "read":
-		current := t.store.ReadLongTerm()
+		current := t.store.ReadTarget(target)
 		if strings.TrimSpace(current) == "" {
-			return t.ok("(memory is empty)")
+			return t.ok(fmt.Sprintf("(%s is empty)", target))
 		}
 		return t.ok(current)
 

@@ -133,6 +133,14 @@ export interface RetainDBConfig {
   sync_every_turns: number
 }
 
+export interface MemoryBackupConfig {
+  enabled: boolean
+  dir?: string
+  keep: number
+  interval_hours: number
+  drift_keep: number
+}
+
 export interface MemoryConfigResponse {
   enabled: boolean
   provider: MemoryProvider
@@ -143,6 +151,9 @@ export interface MemoryConfigResponse {
   extract_enabled: boolean
   extract_every_turns: number
   extract_model?: string
+  profile_enabled: boolean
+  profile_char_limit: number
+  backup: MemoryBackupConfig
   honcho: HonchoConfig
   mem0: Mem0Config
   retaindb: RetainDBConfig

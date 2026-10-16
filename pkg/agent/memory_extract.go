@@ -129,7 +129,7 @@ func (m *MemoryManager) runExtraction(sessionKey string) *MemoryExtractPayload {
 		transcript = m.sanitize(transcript)
 	}
 
-	prompt := buildMemoryExtractionPrompt(transcript, m.store.ReadLongTerm(), m.store.ReadToday())
+	prompt := buildMemoryExtractionPrompt(transcript, m.store.ReadLongTerm(), m.store.ReadToday(), m.store.ReadTarget(TargetProfile))
 	resp, err := m.callExtractionLLM(ctx, prompt)
 	if err != nil || resp == nil || strings.TrimSpace(resp.Content) == "" {
 		logger.WarnCF("agent", "Memory extraction LLM call failed; skipping", map[string]any{
@@ -154,25 +154,35 @@ func (m *MemoryManager) runExtraction(sessionKey string) *MemoryExtractPayload {
 	// Apply removals and replacements BEFORE additions. The store is bounded, so
 	// additions that arrive first can hit the cap and be refused, leaving the
 	// consolidation deadlocked. Freeing room first lets the new entries fit.
-	for _, entry := range ops.Remove {
+	for _, entry := range ops.Memory.Remove {
 		if err := m.store.RemoveLongTerm(entry); err == nil {
 			payload.Removals++
 		}
 	}
-	for _, rep := range ops.Replace {
+	for _, rep := range ops.Memory.Replace {
 		if err := m.store.ReplaceLongTerm(rep.OldText, rep.NewText); err == nil {
 			payload.Replacements++
 		}
 	}
-	for _, entry := range ops.Add {
+	for _, entry := range ops.Memory.Add {
 		if err := m.store.AddLongTerm(entry); err == nil {
 			payload.Additions++
 		}
 	}
 	if m.store.DailyNotesEnabled() {
-		for _, note := range ops.Note {
+		for _, note := range ops.Memory.Note {
 			if err := m.store.AppendToday(note); err == nil {
 				payload.Notes++
+			}
+		}
+	}
+
+	// User-profile facts (PROFILE.md) are a separate bounded file, so they are
+	// applied independently of the long-term memory budget.
+	if m.store.ProfileEnabled() {
+		for _, entry := range ops.Profile.Add {
+			if err := m.store.AddEntry(TargetProfile, entry); err == nil {
+				payload.ProfileAdditions++
 			}
 		}
 	}
@@ -238,10 +248,17 @@ func buildMemoryTranscript(history []providers.Message) string {
 }
 
 // buildMemoryExtractionPrompt instructs the extractor to output strict JSON ops.
-func buildMemoryExtractionPrompt(transcript, longTerm, todayNote string) string {
+func buildMemoryExtractionPrompt(transcript, longTerm, todayNote, profile string) string {
 	var sb strings.Builder
 	sb.WriteString("You are a memory curator for an AI assistant. Review the conversation below and update the assistant's persistent long-term memory.\n\n")
-	sb.WriteString("CURRENT LONG-TERM MEMORY (MEMORY.md):\n")
+	sb.WriteString("CURRENT USER PROFILE (PROFILE.md):\n")
+	if strings.TrimSpace(profile) == "" {
+		sb.WriteString("(empty)\n")
+	} else {
+		sb.WriteString(profile)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\nCURRENT LONG-TERM MEMORY (MEMORY.md):\n")
 	if strings.TrimSpace(longTerm) == "" {
 		sb.WriteString("(empty)\n")
 	} else {
@@ -257,15 +274,16 @@ func buildMemoryExtractionPrompt(transcript, longTerm, todayNote string) string 
 	}
 	sb.WriteString(`
 RULES:
-- "add": durable facts about the user or the project worth remembering across sessions, already condensed to one concise line.
-- "replace": "old_text" MUST exactly match an existing substring in MEMORY.md; "new_text" is its condensed update.
+- "memory": durable facts about the project, the world or ongoing work worth remembering across sessions, already condensed to one concise line.
+- "profile": durable facts about the USER (preferences, identity, how they like to work, stable style) — not project facts.
+- "replace": "old_text" MUST exactly match an existing substring in the matching file; "new_text" is its condensed update.
 - "remove": entries that are now stale/duplicated; the string must match an existing entry line closely.
 - "note": brief dated happenings worth keeping for today (a log entry, not duplicate memory).
 - Store only what you are confident is useful and stable. Prefer few high-value operations over many speculative ones.
-- Do NOT invent facts. Do NOT repeat what is already in MEMORY.md verbatim.
+- Do NOT invent facts. Do NOT repeat what is already stored verbatim.
 
 Respond with ONLY one JSON object, no markdown fences:
-{"memory":{"remove":["entry-substring"],"replace":[{"old_text":"exact existing substring","new_text":"condensed replacement"}],"add":["concise line"],"note":["brief note"]}}
+{"memory":{"remove":["entry-substring"],"replace":[{"old_text":"exact existing substring","new_text":"condensed replacement"}],"add":["concise line"],"note":["brief note"]},"profile":{"add":["concise user fact"]}}
 Omit keys with no operations.
 
 CONVERSATION:
@@ -275,6 +293,12 @@ CONVERSATION:
 }
 
 type memoryOps struct {
+	Memory  opsBlock
+	Profile opsBlock
+}
+
+// opsBlock is the parsed shape of one memory/profile ops block.
+type opsBlock struct {
 	Add     []string
 	Replace []memoryReplaceOp
 	Remove  []string
@@ -286,40 +310,60 @@ type memoryReplaceOp struct {
 	NewText string
 }
 
+type opsBlockJSON struct {
+	Remove  []string `json:"remove"`
+	Replace []struct {
+		OldText string `json:"old_text"`
+		NewText string `json:"new_text"`
+	} `json:"replace"`
+	Add  []string `json:"add"`
+	Note []string `json:"note"`
+}
+
 type memoryOpsJSON struct {
-	Memory *struct {
-		Remove  []string `json:"remove"`
-		Replace []struct {
-			OldText string `json:"old_text"`
-			NewText string `json:"new_text"`
-		} `json:"replace"`
-		Add  []string `json:"add"`
-		Note []string `json:"note"`
-	} `json:"memory"`
+	Memory  *opsBlockJSON `json:"memory"`
+	Profile *opsBlockJSON `json:"profile"`
 }
 
 // parseMemoryOps tolerates fenced/verbose LLM output and extracts the ops JSON.
-// The ops may be wrapped under a "memory" key or given bare at the top level.
+// The ops may be wrapped under "memory"/"profile" keys or given bare at the top
+// level; a bare object is treated as long-term memory ops for backwards
+// compatibility.
 func parseMemoryOps(content string) *memoryOps {
 	var raw memoryOpsJSON
 	if err := json.Unmarshal([]byte(extractJSONObject(content)), &raw); err != nil {
 		return nil
 	}
-	if raw.Memory == nil {
-		return nil
+	ops := &memoryOps{}
+	if raw.Memory != nil {
+		ops.Memory = parseOpsBlock(raw.Memory)
 	}
-	inner := raw.Memory
-	ops := &memoryOps{
-		Add:    nonempty(inner.Add),
-		Remove: nonempty(inner.Remove),
-		Note:   nonempty(inner.Note),
+	if raw.Profile != nil {
+		ops.Profile = parseOpsBlock(raw.Profile)
 	}
-	for _, rep := range inner.Replace {
-		if strings.TrimSpace(rep.OldText) != "" {
-			ops.Replace = append(ops.Replace, memoryReplaceOp{OldText: rep.OldText, NewText: rep.NewText})
+	// Bare top-level block (no "memory"/"profile" key): treat as long-term ops.
+	if raw.Memory == nil && raw.Profile == nil {
+		var bare opsBlockJSON
+		if err := json.Unmarshal([]byte(extractJSONObject(content)), &bare); err != nil {
+			return nil
 		}
+		ops.Memory = parseOpsBlock(&bare)
 	}
 	return ops
+}
+
+func parseOpsBlock(b *opsBlockJSON) opsBlock {
+	out := opsBlock{
+		Add:    nonempty(b.Add),
+		Remove: nonempty(b.Remove),
+		Note:   nonempty(b.Note),
+	}
+	for _, rep := range b.Replace {
+		if strings.TrimSpace(rep.OldText) != "" {
+			out.Replace = append(out.Replace, memoryReplaceOp{OldText: rep.OldText, NewText: rep.NewText})
+		}
+	}
+	return out
 }
 
 // extractJSONObject grabs the substring between the first '{' and last '}', stripping fences.

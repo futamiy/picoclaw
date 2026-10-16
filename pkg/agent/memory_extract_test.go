@@ -15,14 +15,14 @@ func TestParseMemoryOps_FencedJSON(t *testing.T) {
 	if ops == nil {
 		t.Fatal("expected ops")
 	}
-	if len(ops.Add) != 1 || ops.Add[0] != "durable fact" {
-		t.Errorf("add: %v", ops.Add)
+	if len(ops.Memory.Add) != 1 || ops.Memory.Add[0] != "durable fact" {
+		t.Errorf("add: %v", ops.Memory.Add)
 	}
-	if len(ops.Replace) != 1 || ops.Replace[0].OldText != "old fact" || ops.Replace[0].NewText != "updated fact" {
-		t.Errorf("replace: %+v", ops.Replace)
+	if len(ops.Memory.Replace) != 1 || ops.Memory.Replace[0].OldText != "old fact" || ops.Memory.Replace[0].NewText != "updated fact" {
+		t.Errorf("replace: %+v", ops.Memory.Replace)
 	}
-	if len(ops.Remove) != 1 || len(ops.Note) != 1 {
-		t.Errorf("remove/note: %v / %v", ops.Remove, ops.Note)
+	if len(ops.Memory.Remove) != 1 || len(ops.Memory.Note) != 1 {
+		t.Errorf("remove/note: %v / %v", ops.Memory.Remove, ops.Memory.Note)
 	}
 }
 
@@ -32,13 +32,24 @@ func TestParseMemoryOps_Garbage(t *testing.T) {
 	}
 }
 
+func TestParseMemoryOps_Profile(t *testing.T) {
+	content := "```json\n{\"memory\":{\"add\":[\"project fact\"]},\"profile\":{\"add\":[\"prefers terse answers\"]}}\n```"
+	ops := parseMemoryOps(content)
+	if ops == nil {
+		t.Fatal("expected ops")
+	}
+	if len(ops.Memory.Add) != 1 || len(ops.Profile.Add) != 1 || ops.Profile.Add[0] != "prefers terse answers" {
+		t.Fatalf("memory/profile routing: %+v", ops)
+	}
+}
+
 func TestParseMemoryOps_EmptyArrays(t *testing.T) {
 	ops := parseMemoryOps(`{"memory":{}}`)
 	if ops == nil {
 		t.Fatal("expected empty ops, not nil")
 	}
-	if len(ops.Add) != 0 {
-		t.Errorf("expected no add entries, got %v", ops.Add)
+	if len(ops.Memory.Add) != 0 {
+		t.Errorf("expected no add entries, got %v", ops.Memory.Add)
 	}
 }
 
@@ -87,11 +98,13 @@ func TestMemoryManager_RunExtraction(t *testing.T) {
 		DailyNotesEnabled:  true,
 		DailyNoteCharLimit: 10000,
 		DailyNotesDays:     1,
+		ProfileEnabled:     true,
+		ProfileCharLimit:   2000,
 	})
 	_ = store.WriteLongTerm("old fact to update\nstale entry\n")
 
 	prov := &extractorProvider{
-		content: `{"memory":{"remove":["stale entry"],"add":["prefers open-source tools"],"replace":[{"old_text":"old fact to update","new_text":"updated fact"}],"note":["user preference clarified"]}}`,
+		content: `{"memory":{"remove":["stale entry"],"add":["prefers open-source tools"],"replace":[{"old_text":"old fact to update","new_text":"updated fact"}],"note":["user preference clarified"]},"profile":{"add":["prefers open-source tools"]}}`,
 	}
 	agent := &AgentInstance{
 		ID:       "default-agent",
@@ -108,7 +121,7 @@ func TestMemoryManager_RunExtraction(t *testing.T) {
 	if payload == nil {
 		t.Fatal("expected non-nil payload")
 	}
-	if payload.Additions != 1 || payload.Replacements != 1 || payload.Removals != 1 || payload.Notes != 1 {
+	if payload.Additions != 1 || payload.Replacements != 1 || payload.Removals != 1 || payload.Notes != 1 || payload.ProfileAdditions != 1 {
 		t.Fatalf("unexpected counts: %+v", payload)
 	}
 	got := store.ReadLongTerm()
@@ -117,6 +130,9 @@ func TestMemoryManager_RunExtraction(t *testing.T) {
 	}
 	if !strings.Contains(got, "prefers open-source tools") {
 		t.Fatalf("add not applied: %q", got)
+	}
+	if !strings.Contains(store.ReadTarget(TargetProfile), "prefers open-source tools") {
+		t.Fatalf("profile add not applied")
 	}
 }
 
