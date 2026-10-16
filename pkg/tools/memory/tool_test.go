@@ -13,12 +13,16 @@ type fakeStore struct {
 	longLimit int
 	notes     []string
 	notesOn   bool
+	failAll   bool
 }
 
 func (f *fakeStore) ReadLongTerm() string    { return f.longTerm }
 func (f *fakeStore) LongTermCharLimit() int  { return f.longLimit }
 func (f *fakeStore) DailyNotesEnabled() bool { return f.notesOn }
 func (f *fakeStore) AddLongTerm(e string) error {
+	if f.failAll {
+		return errors.New("memory limit exceeded")
+	}
 	if f.longTerm != "" {
 		f.longTerm += "\n" + e
 	} else {
@@ -35,6 +39,24 @@ func (f *fakeStore) ReplaceLongTerm(o, n string) error {
 }
 func (f *fakeStore) RemoveLongTerm(s string) error {
 	f.longTerm = ""
+	return nil
+}
+func (f *fakeStore) ApplyOperations(ops []Operation) error {
+	if f.failAll {
+		return errors.New("memory limit exceeded")
+	}
+	for _, op := range ops {
+		switch op.Op {
+		case "add":
+			_ = f.AddLongTerm(op.Content)
+		case "replace":
+			_ = f.ReplaceLongTerm(op.OldText, op.NewText)
+		case "remove":
+			_ = f.RemoveLongTerm(op.Text)
+		default:
+			return errors.New("unknown op " + op.Op)
+		}
+	}
 	return nil
 }
 func (f *fakeStore) AppendToday(c string) error {
@@ -92,5 +114,70 @@ func TestMemoryTool_DescriptionMentionsCap(t *testing.T) {
 	tool := NewMemoryTool(&fakeStore{longLimit: 2200, notesOn: true})
 	if !strings.Contains(tool.Description(), "capped") {
 		t.Fatalf("description should mention the cap: %q", tool.Description())
+	}
+}
+
+func TestMemoryTool_BatchOperations(t *testing.T) {
+	store := &fakeStore{notesOn: true}
+	res := NewMemoryTool(store).Execute(context.Background(), map[string]any{
+		"operations": []any{
+			map[string]any{"op": "add", "content": "entry A"},
+			map[string]any{"op": "replace", "old_text": "A", "new_text": "B"},
+			map[string]any{"op": "remove", "text": "B"},
+		},
+	})
+	if res.IsError {
+		t.Fatalf("batch should succeed, got %q", res.ForLLM)
+	}
+	if !strings.Contains(res.ForLLM, "Applied 3 memory operations atomically.") {
+		t.Fatalf("unexpected batch result: %q", res.ForLLM)
+	}
+}
+
+func TestMemoryTool_BatchTakesPrecedenceOverAction(t *testing.T) {
+	store := &fakeStore{notesOn: true}
+	res := NewMemoryTool(store).Execute(context.Background(), map[string]any{
+		"action":     "nuke", // would error on its own
+		"operations": []any{map[string]any{"op": "add", "content": "kept"}},
+	})
+	if res.IsError {
+		t.Fatalf("operations must take precedence over action, got %q", res.ForLLM)
+	}
+	if !strings.Contains(store.longTerm, "kept") {
+		t.Fatalf("batch op not applied: %q", store.longTerm)
+	}
+}
+
+func TestMemoryTool_ConsecutiveFailureCap(t *testing.T) {
+	tool := NewMemoryTool(&fakeStore{notesOn: true, failAll: true})
+	ctx := context.Background()
+	args := map[string]any{"action": "add", "content": "x"}
+
+	for i := 1; i < maxConsecutiveFailures; i++ {
+		if res := tool.Execute(ctx, args); !res.IsError || strings.Contains(res.ForLLM, "STOP") {
+			t.Fatalf("failure %d should error without STOP, got %q", i, res.ForLLM)
+		}
+	}
+	res := tool.Execute(ctx, args)
+	if !res.IsError || !strings.Contains(res.ForLLM, "STOP") {
+		t.Fatalf("call %d should return the terminal STOP message, got %q", maxConsecutiveFailures, res.ForLLM)
+	}
+}
+
+func TestMemoryTool_SuccessResetsFailureCap(t *testing.T) {
+	store := &fakeStore{notesOn: true, failAll: true}
+	tool := NewMemoryTool(store)
+	ctx := context.Background()
+	for i := 0; i < maxConsecutiveFailures-1; i++ {
+		tool.Execute(ctx, map[string]any{"action": "add", "content": "x"})
+	}
+	store.failAll = false
+	if res := tool.Execute(ctx, map[string]any{"action": "add", "content": "ok"}); res.IsError {
+		t.Fatalf("expected success after store recovers, got %q", res.ForLLM)
+	}
+	// Counter reset: subsequent failures start over, no STOP on the first.
+	store.failAll = true
+	if res := tool.Execute(ctx, map[string]any{"action": "add", "content": "x"}); strings.Contains(res.ForLLM, "STOP") {
+		t.Fatalf("failure counter should have reset, got %q", res.ForLLM)
 	}
 }

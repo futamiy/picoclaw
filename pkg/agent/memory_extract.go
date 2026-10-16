@@ -151,9 +151,12 @@ func (m *MemoryManager) runExtraction(sessionKey string) *MemoryExtractPayload {
 		SessionKey:   sessionKey,
 		ScannedTurns: len(agent.Sessions.GetHistory(sessionKey)),
 	}
-	for _, entry := range ops.Add {
-		if err := m.store.AddLongTerm(entry); err == nil {
-			payload.Additions++
+	// Apply removals and replacements BEFORE additions. The store is bounded, so
+	// additions that arrive first can hit the cap and be refused, leaving the
+	// consolidation deadlocked. Freeing room first lets the new entries fit.
+	for _, entry := range ops.Remove {
+		if err := m.store.RemoveLongTerm(entry); err == nil {
+			payload.Removals++
 		}
 	}
 	for _, rep := range ops.Replace {
@@ -161,9 +164,9 @@ func (m *MemoryManager) runExtraction(sessionKey string) *MemoryExtractPayload {
 			payload.Replacements++
 		}
 	}
-	for _, entry := range ops.Remove {
-		if err := m.store.RemoveLongTerm(entry); err == nil {
-			payload.Removals++
+	for _, entry := range ops.Add {
+		if err := m.store.AddLongTerm(entry); err == nil {
+			payload.Additions++
 		}
 	}
 	if m.store.DailyNotesEnabled() {

@@ -18,11 +18,13 @@ import (
 
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/fileutil"
+	"github.com/sipeed/picoclaw/pkg/logger"
+	memorytool "github.com/sipeed/picoclaw/pkg/tools/memory"
 )
 
 // ErrMemoryFull is returned when a memory write would exceed the configured
 // character limit. The agent is expected to condense (replace/remove) first.
-var ErrMemoryFull = errors.New("memory limit exceeded; remove or replace existing entries first")
+var ErrMemoryFull = errors.New("memory limit exceeded")
 
 // MemoryOptions controls the bounded memory store behavior.
 type MemoryOptions struct {
@@ -55,6 +57,8 @@ type MemoryStore struct {
 	memoryFile string
 	opts       MemoryOptions
 	mu         sync.Mutex // guards read-modify-write ops (tool + async extractor)
+
+	overLimitWarn sync.Once // fires once per store when MEMORY.md is found over-limit
 }
 
 // NewMemoryStore creates a new MemoryStore with the given workspace path and
@@ -144,14 +148,11 @@ func (ms *MemoryStore) AddLongTerm(entry string) error {
 	if entry == "" {
 		return fmt.Errorf("entry is required")
 	}
-	current := ms.ReadLongTerm()
-	if memoryHasEntry(current, entry) {
+	updated, changed := memoryApplyAdd(ms.ReadLongTerm(), entry)
+	if !changed {
 		return nil
 	}
-	if strings.TrimSpace(current) == "" {
-		return ms.writeLongTermUnlocked(entry + "\n")
-	}
-	return ms.writeLongTermUnlocked(strings.TrimRight(current, "\n") + "\n" + entry + "\n")
+	return ms.writeLongTermUnlocked(updated)
 }
 
 // ReplaceLongTerm replaces oldText with newText in MEMORY.md.
@@ -162,14 +163,11 @@ func (ms *MemoryStore) ReplaceLongTerm(oldText, newText string) error {
 	if oldText == "" {
 		return fmt.Errorf("old_text is required")
 	}
-	current := ms.ReadLongTerm()
-	if !strings.Contains(current, oldText) {
-		return fmt.Errorf("old_text not found in memory")
+	updated, err := memoryApplyReplace(ms.ReadLongTerm(), oldText, newText)
+	if err != nil {
+		return err
 	}
-	if strings.Count(current, oldText) > 1 {
-		return fmt.Errorf("old_text appears more than once; provide more context")
-	}
-	return ms.writeLongTermUnlocked(strings.Replace(current, oldText, newText, 1))
+	return ms.writeLongTermUnlocked(updated)
 }
 
 // RemoveLongTerm removes the first line containing substr from MEMORY.md.
@@ -185,6 +183,82 @@ func (ms *MemoryStore) RemoveLongTerm(substr string) error {
 	if current == "" {
 		return nil
 	}
+	updated, removed := memoryApplyRemove(current, substr)
+	if !removed {
+		return fmt.Errorf("no memory entry matched %q", substr)
+	}
+	return ms.writeLongTermUnlocked(updated)
+}
+
+// ApplyOperations applies a batch of long-term memory mutations atomically: ops
+// run in order against a working copy and the result is written once. The limit
+// is checked only on the FINAL content, so a batch can free room (remove/replace)
+// and add new entries even when an intermediate size would exceed the cap. Any
+// invalid op aborts the whole batch with nothing written.
+func (ms *MemoryStore) ApplyOperations(ops []memorytool.Operation) error {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	working := ms.ReadLongTerm()
+	for _, op := range ops {
+		switch strings.ToLower(strings.TrimSpace(op.Op)) {
+		case "add":
+			entry := strings.TrimSpace(op.Content)
+			if entry == "" {
+				return fmt.Errorf("add: content is required")
+			}
+			working, _ = memoryApplyAdd(working, entry)
+		case "replace":
+			if op.OldText == "" {
+				return fmt.Errorf("replace: old_text is required")
+			}
+			updated, err := memoryApplyReplace(working, op.OldText, op.NewText)
+			if err != nil {
+				return fmt.Errorf("replace %q: %w", op.OldText, err)
+			}
+			working = updated
+		case "remove":
+			text := strings.TrimSpace(op.Text)
+			if text == "" {
+				return fmt.Errorf("remove: text is required")
+			}
+			updated, removed := memoryApplyRemove(working, text)
+			if !removed {
+				return fmt.Errorf("remove %q: no memory entry matched", text)
+			}
+			working = updated
+		default:
+			return fmt.Errorf("unknown op %q; expected add, replace or remove", op.Op)
+		}
+	}
+	return ms.writeLongTermUnlocked(working)
+}
+
+// memoryApplyAdd appends entry to current unless it is already present (dedup).
+// It returns the new content and whether anything changed.
+func memoryApplyAdd(current, entry string) (string, bool) {
+	if memoryHasEntry(current, entry) {
+		return current, false
+	}
+	if strings.TrimSpace(current) == "" {
+		return entry + "\n", true
+	}
+	return strings.TrimRight(current, "\n") + "\n" + entry + "\n", true
+}
+
+// memoryApplyReplace swaps the single occurrence of oldText for newText.
+func memoryApplyReplace(current, oldText, newText string) (string, error) {
+	if !strings.Contains(current, oldText) {
+		return "", fmt.Errorf("old_text not found in memory")
+	}
+	if strings.Count(current, oldText) > 1 {
+		return "", fmt.Errorf("old_text appears more than once; provide more context")
+	}
+	return strings.Replace(current, oldText, newText, 1), nil
+}
+
+// memoryApplyRemove drops the first line containing substr.
+func memoryApplyRemove(current, substr string) (string, bool) {
 	lines := strings.Split(current, "\n")
 	kept := make([]string, 0, len(lines))
 	removed := false
@@ -195,10 +269,7 @@ func (ms *MemoryStore) RemoveLongTerm(substr string) error {
 		}
 		kept = append(kept, line)
 	}
-	if !removed {
-		return fmt.Errorf("no memory entry matched %q", substr)
-	}
-	return ms.writeLongTermUnlocked(strings.Join(kept, "\n"))
+	return strings.Join(kept, "\n"), removed
 }
 
 // ReadToday reads today's daily note.
@@ -283,7 +354,20 @@ func (ms *MemoryStore) GetRecentDailyNotes(days int) string {
 // Includes long-term memory and recent daily notes.
 func (ms *MemoryStore) GetMemoryContext() string {
 	longTerm := ms.ReadLongTerm()
-	if limit := ms.opts.LongTermCharLimit; limit > 0 {
+	used := utf8.RuneCountInString(longTerm)
+	limit := ms.opts.LongTermCharLimit
+	if limit > 0 {
+		if used > limit {
+			// The file can exceed the limit via hand-editing or a lowered limit.
+			// Warn once so the refusal reason is visible instead of opaque.
+			ms.overLimitWarn.Do(func() {
+				logger.WarnCF("agent", "MEMORY.md is over its rune limit; new entries will be refused until it is trimmed", map[string]any{
+					"current_runes": used,
+					"limit_runes":   limit,
+					"over_by":       used - limit,
+				})
+			})
+		}
 		longTerm = truncateRunes(longTerm, limit)
 	}
 
@@ -299,7 +383,11 @@ func (ms *MemoryStore) GetMemoryContext() string {
 	var sb strings.Builder
 
 	if longTerm != "" {
-		sb.WriteString("## Long-term Memory\n\n")
+		sb.WriteString("## Long-term Memory")
+		if limit > 0 {
+			fmt.Fprintf(&sb, " [%d/%d runes]", used, limit)
+		}
+		sb.WriteString("\n\n")
 		sb.WriteString(longTerm)
 	}
 
@@ -315,12 +403,15 @@ func (ms *MemoryStore) GetMemoryContext() string {
 }
 
 // checkLimit returns ErrMemoryFull when content exceeds limit (limit <= 0 = unlimited).
+// The error states the current size, the limit and how many runes must be freed, so the
+// agent can consolidate (remove/replace stale entries) instead of retrying blindly.
 func (ms *MemoryStore) checkLimit(content string, limit int) error {
 	if limit <= 0 {
 		return nil
 	}
-	if utf8.RuneCountInString(content) > limit {
-		return fmt.Errorf("%w (limit %d runes, got %d)", ErrMemoryFull, limit, utf8.RuneCountInString(content))
+	if n := utf8.RuneCountInString(content); n > limit {
+		return fmt.Errorf("%w (limit %d runes, got %d; remove or replace stale entries to free at least %d runes, then retry)",
+			ErrMemoryFull, limit, n, n-limit)
 	}
 	return nil
 }

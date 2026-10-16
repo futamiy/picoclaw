@@ -120,6 +120,36 @@ func TestMemoryManager_RunExtraction(t *testing.T) {
 	}
 }
 
+func TestMemoryManager_RunExtractionFreesRoomBeforeAdd(t *testing.T) {
+	dir := t.TempDir()
+	sessions := session.NewSessionManager(dir + "/sessions")
+	sessions.AddFullMessage("s1", providers.Message{Role: "user", Content: "I prefer open-source tools"})
+
+	store := NewMemoryStoreWithOptions(dir, MemoryOptions{LongTermCharLimit: 45})
+	if err := store.WriteLongTerm("keep fact one\nstale entry\n"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// The added entry alone would overflow the 45-rune cap; it only fits once the
+	// removal frees room. Add-before-remove (the old order) deadlocks here.
+	prov := &extractorProvider{
+		content: `{"memory":{"remove":["stale entry"],"add":["prefers open-source tools"]}}`,
+	}
+	agent := &AgentInstance{ID: "default-agent", Model: "main-model", Provider: prov, Sessions: sessions}
+	mm := newMemoryManager(agent, store, MemoryExtractOptions{EveryTurns: 1}, nil)
+
+	payload := mm.runExtraction("s1")
+	if payload == nil {
+		t.Fatal("expected payload")
+	}
+	if payload.Additions != 1 || payload.Removals != 1 {
+		t.Fatalf("consolidation must free room before adding: %+v", payload)
+	}
+	if got := store.ReadLongTerm(); !strings.Contains(got, "prefers open-source tools") {
+		t.Fatalf("add not applied after removal freed room: %q", got)
+	}
+}
+
 func TestMemoryManager_RunExtractionSanitizes(t *testing.T) {
 	dir := t.TempDir()
 	sessions := session.NewSessionManager(dir + "/sessions")

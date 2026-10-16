@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	memorytool "github.com/sipeed/picoclaw/pkg/tools/memory"
 )
 
 // newTestMemoryStore builds a store with a tiny cap so over-limit behavior is easy to assert.
@@ -26,6 +28,19 @@ func TestMemoryStore_WriteLimitRejected(t *testing.T) {
 	}
 	if got := ms.ReadLongTerm(); got != "" {
 		t.Fatalf("write must be rejected and not persisted, got %q", got)
+	}
+}
+
+func TestMemoryStore_WriteLimitErrorIsActionable(t *testing.T) {
+	ms := newTestMemoryStore(t, 10)
+	err := ms.WriteLongTerm(strings.Repeat("x", 25))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	for _, want := range []string{"memory limit exceeded", "limit 10 runes", "got 25", "free at least 15 runes"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error missing %q: %v", want, err)
+		}
 	}
 }
 
@@ -115,6 +130,44 @@ func TestMemoryStore_GetMemoryContextTruncatesOverLimit(t *testing.T) {
 	ctx := ms.GetMemoryContext()
 	if !strings.Contains(ctx, "[memory truncated]") {
 		t.Fatalf("expected truncation marker, got %q", ctx)
+	}
+}
+
+func TestMemoryStore_ApplyOperationsChecksFinalSize(t *testing.T) {
+	ms := newTestMemoryStore(t, 45)
+	if err := ms.WriteLongTerm("keep fact one\nstale entry\n"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// add-alone would overflow (52 > 45); remove-first makes it fit (40). The batch
+	// must be judged on the FINAL size, not the intermediate add-first state.
+	err := ms.ApplyOperations([]memorytool.Operation{
+		{Op: "add", Content: "prefers open-source tools"},
+		{Op: "remove", Text: "stale entry"},
+	})
+	if err != nil {
+		t.Fatalf("final size fits the cap, batch must succeed: %v", err)
+	}
+	got := ms.ReadLongTerm()
+	if strings.Contains(got, "stale entry") || !strings.Contains(got, "prefers open-source tools") {
+		t.Fatalf("batch not applied: %q", got)
+	}
+}
+
+func TestMemoryStore_ApplyOperationsRollsBackOnInvalidOp(t *testing.T) {
+	ms := newTestMemoryStore(t, 1000)
+	if err := ms.WriteLongTerm("keep me\n"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	before := ms.ReadLongTerm()
+	err := ms.ApplyOperations([]memorytool.Operation{
+		{Op: "add", Content: "new entry"},
+		{Op: "remove", Text: "does-not-exist"},
+	})
+	if err == nil {
+		t.Fatal("expected error from an unmatched remove")
+	}
+	if ms.ReadLongTerm() != before {
+		t.Fatalf("failed batch must write nothing, got %q", ms.ReadLongTerm())
 	}
 }
 
