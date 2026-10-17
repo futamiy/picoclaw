@@ -523,10 +523,62 @@ func sideQuestionResponseContent(response *providers.LLMResponse) string {
 	if response == nil {
 		return ""
 	}
-	if strings.TrimSpace(response.Content) != "" {
-		return response.Content
+	content := response.Content
+	if strings.TrimSpace(content) == "" {
+		content = responseReasoningContent(response)
 	}
-	return responseReasoningContent(response)
+	return sanitizeSideQuestionContent(content)
+}
+
+// sideQuestionToolCallNotice replaces a side-question answer that consisted
+// solely of tool-call markup (the model tried to run a tool, which /btw does
+// not allow).
+const sideQuestionToolCallNotice = "The model tried to run a tool instead of answering. " +
+	"Side questions (/btw) cannot use tools — try rephrasing as a direct question."
+
+// toolCallMarkupMarkers are substrings that indicate a model emitted a
+// tool-call/tool-invocation block as plain text instead of a structured tool
+// call. DeepSeek-family models delimit their special tokens with a fullwidth
+// vertical bar (U+FF5C); others use XML-ish tags. Since tools are not provided
+// for side questions, such markup is never part of a valid plain-text answer.
+var toolCallMarkupMarkers = []string{
+	"<" + "\uFF5C", // DeepSeek-style fullwidth-pipe tool tokens
+	"<tool_call",
+	"<tool_calls",
+}
+
+// stripToolCallMarkup removes tool-call markup, dropping everything from the
+// first marker onward, and returns the remaining text. Plain-text answers that
+// merely mention a tool name are unaffected because they contain no marker.
+func stripToolCallMarkup(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+	cut := -1
+	for _, marker := range toolCallMarkupMarkers {
+		if i := strings.Index(content, marker); i >= 0 && (cut < 0 || i < cut) {
+			cut = i
+		}
+	}
+	if cut < 0 {
+		return content
+	}
+	return strings.TrimSpace(content[:cut])
+}
+
+// sanitizeSideQuestionContent strips tool-call markup from a side-question
+// answer. When the answer was nothing but markup, it returns a short notice so
+// the user does not see raw model syntax or a misleading "empty response".
+func sanitizeSideQuestionContent(content string) string {
+	if strings.TrimSpace(content) == "" {
+		return ""
+	}
+	stripped := stripToolCallMarkup(content)
+	if strings.TrimSpace(stripped) == "" {
+		return sideQuestionToolCallNotice
+	}
+	return stripped
 }
 
 func responseReasoningContent(response *providers.LLMResponse) string {
