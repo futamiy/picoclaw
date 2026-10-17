@@ -77,6 +77,7 @@ You can also inspect skills and MCP servers directly from Telegram:
 - `/use <skill>` and then send the actual request in the next message
 - `/use clear`
 - `/btw <question>` to ask an immediate side question without changing the active session history; `/btw` is handled as a no-tool query and does not enter the normal tool-execution flow
+- `/compact` (alias `/compress`) to force summarization of the current conversation context now, regardless of the automatic thresholds; the reply reports the before/after message and token counts
 
 **4. Advanced Formatting**
 You can set use_markdown_v2: true to enable enhanced formatting options. This allows the bot to utilize the full range of Telegram MarkdownV2 features, including nested styles, spoilers, and custom fixed-width blocks.
