@@ -406,3 +406,52 @@ func TestBuiltinBtwCommand_PreservesQuestionWhitespace(t *testing.T) {
 		t.Fatalf("/btw outcome=%v, want=%v", res.Outcome, OutcomeHandled)
 	}
 }
+
+func TestBuiltinCompactCommand_ReportsResult(t *testing.T) {
+	rt := &Runtime{
+		Compact: func(context.Context) (CompactResult, error) {
+			return CompactResult{BeforeMessages: 12, AfterMessages: 5, BeforeTokens: 9000, AfterTokens: 2500}, nil
+		},
+	}
+	ex := NewExecutor(NewRegistry(BuiltinDefinitions()), rt)
+
+	var reply string
+	res := ex.Execute(context.Background(), Request{
+		Text: "/compact",
+		Reply: func(text string) error {
+			reply = text
+			return nil
+		},
+	})
+	if res.Outcome != OutcomeHandled {
+		t.Fatalf("/compact outcome=%v, want=%v", res.Outcome, OutcomeHandled)
+	}
+	if !strings.Contains(reply, "12 → 5 messages") || !strings.Contains(reply, "~9000 → ~2500 tokens") {
+		t.Fatalf("/compact reply=%q, want before/after stats", reply)
+	}
+}
+
+func TestBuiltinCompactCommand_CompressAlias(t *testing.T) {
+	called := false
+	rt := &Runtime{
+		Compact: func(context.Context) (CompactResult, error) {
+			called = true
+			return CompactResult{BeforeMessages: 1, AfterMessages: 1}, nil
+		},
+	}
+	ex := NewExecutor(NewRegistry(BuiltinDefinitions()), rt)
+
+	res := ex.Execute(context.Background(), Request{
+		Text:  "/compress",
+		Reply: func(string) error { return nil },
+	})
+	if res.Outcome != OutcomeHandled {
+		t.Fatalf("/compress outcome=%v, want=%v", res.Outcome, OutcomeHandled)
+	}
+	if res.Command != "compact" {
+		t.Fatalf("/compress resolved to command %q, want alias target %q", res.Command, "compact")
+	}
+	if !called {
+		t.Fatalf("/compress did not invoke Compact")
+	}
+}

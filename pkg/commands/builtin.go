@@ -9,7 +9,6 @@ func BuiltinDefinitions() []Definition {
 		startCommand(),
 		helpCommand(),
 		stopCommand(),
-		continueCommand(),
 		showCommand(),
 		listCommand(),
 		useCommand(),
@@ -18,6 +17,7 @@ func BuiltinDefinitions() []Definition {
 		checkCommand(),
 		clearCommand(),
 		contextCommand(),
+		compactCommand(),
 		subagentsCommand(),
 		reloadCommand(),
 	}

@@ -44,6 +44,14 @@ type StopResult struct {
 	TaskName string
 }
 
+// CompactResult reports the effect of an explicit /compact on session context.
+type CompactResult struct {
+	BeforeMessages int
+	AfterMessages  int
+	BeforeTokens   int
+	AfterTokens    int
+}
+
 // Runtime provides runtime dependencies to command handlers. It is constructed
 // per-request by the agent loop so that per-request state (like session scope)
 // can coexist with long-lived callbacks (like GetModelInfo).
@@ -64,7 +72,7 @@ type Runtime struct {
 	ClearHistory       func() error
 	ReloadConfig       func() error
 	StopActiveTurn     func() (StopResult, error)
-	// Continue resumes the current session's turn (e.g. after a tool-iteration
-	// limit or transient failure) and returns the continued response text.
-	Continue func(ctx context.Context) (string, error)
+	// Compact forces synchronous summarization of the current session context
+	// (used by /compact) and returns before/after stats.
+	Compact func(ctx context.Context) (CompactResult, error)
 }

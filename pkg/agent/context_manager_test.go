@@ -521,6 +521,58 @@ func TestLegacyCompact_PostTurn_ExceedsMessageThreshold(t *testing.T) {
 	}
 }
 
+func TestLegacyCompact_Manual_ForcedSummarize(t *testing.T) {
+	// High threshold: maybeSummarize would NOT fire, so any reduction proves
+	// the manual path forces summarization regardless of thresholds.
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:                 t.TempDir(),
+				ModelName:                 "test-model",
+				MaxTokens:                 4096,
+				MaxToolIterations:         10,
+				ContextWindow:             8000,
+				SummarizeMessageThreshold: 100,
+				SummarizeTokenPercent:     75,
+			},
+		},
+	}
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &simpleMockProvider{response: "summary"})
+
+	defaultAgent := al.registry.GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("expected default agent")
+	}
+
+	history := []providers.Message{
+		{Role: "user", Content: "q1"},
+		{Role: "assistant", Content: "a1"},
+		{Role: "user", Content: "q2"},
+		{Role: "assistant", Content: "a2"},
+		{Role: "user", Content: "q3"},
+		{Role: "assistant", Content: "a3"},
+	}
+	defaultAgent.Sessions.SetHistory("session-manual", history)
+
+	err := al.contextManager.Compact(context.Background(), &CompactRequest{
+		SessionKey: "session-manual",
+		Reason:     ContextCompressReasonManual,
+		Budget:     defaultAgent.ContextWindow,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Manual compact is synchronous: history must already be reduced on return.
+	newHistory := defaultAgent.Sessions.GetHistory("session-manual")
+	if len(newHistory) >= len(history) {
+		t.Fatalf("expected forced summarization to reduce history from %d, got %d", len(history), len(newHistory))
+	}
+	if defaultAgent.Sessions.GetSummary("session-manual") == "" {
+		t.Fatal("expected a stored summary after manual compact")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Legacy Ingest tests
 // ---------------------------------------------------------------------------

@@ -53,6 +53,9 @@ func (m *legacyContextManager) Compact(_ context.Context, req *CompactRequest) e
 		}
 	case ContextCompressReasonSummarize:
 		m.maybeSummarize(req.SessionKey)
+	case ContextCompressReasonManual:
+		// Explicit /compact: summarize synchronously, ignoring thresholds.
+		m.forceSummarize(req.SessionKey)
 	}
 	return nil
 }
@@ -104,6 +107,25 @@ func (m *legacyContextManager) maybeSummarize(sessionKey string) {
 			}()
 		}
 	}
+}
+
+// forceSummarize runs summarization synchronously for an explicit /compact
+// request, bypassing the threshold gate in maybeSummarize. It resolves the
+// session's owning agent so routed (non-default) sessions are handled too.
+func (m *legacyContextManager) forceSummarize(sessionKey string) {
+	agent := m.al.agentForSession(sessionKey)
+	if agent == nil {
+		agent = m.al.registry.GetDefaultAgent()
+	}
+	if agent == nil || agent.Sessions == nil {
+		return
+	}
+	summarizeKey := agent.ID + ":" + sessionKey
+	if _, loading := m.summarizing.LoadOrStore(summarizeKey, true); loading {
+		return
+	}
+	defer m.summarizing.Delete(summarizeKey)
+	m.summarizeSession(agent, sessionKey)
 }
 
 type compressionResult struct {

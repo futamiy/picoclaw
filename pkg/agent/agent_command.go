@@ -280,12 +280,6 @@ func (al *AgentLoop) buildCommandsRuntime(
 		}
 		return al.stopActiveTurnForSession(opts.Dispatch.SessionKey)
 	}
-	rt.Continue = func(ctx context.Context) (string, error) {
-		if opts == nil {
-			return "", fmt.Errorf("process options not available")
-		}
-		return al.Continue(ctx, opts.Dispatch.SessionKey, opts.Dispatch.Channel(), opts.Dispatch.ChatID())
-	}
 	if agent != nil && agent.ContextBuilder != nil {
 		rt.ListSkillNames = agent.ContextBuilder.ListSkillNames
 	}
@@ -421,6 +415,19 @@ func (al *AgentLoop) buildCommandsRuntime(
 				UsedPercent:       usage.UsedPercent,
 				MessageCount:      len(history),
 			}
+		}
+
+		rt.Compact = func(ctx context.Context) (commands.CompactResult, error) {
+			if opts == nil {
+				return commands.CompactResult{}, fmt.Errorf("process options not available")
+			}
+			ensureSessionMetadata(
+				agent.Sessions,
+				opts.Dispatch.SessionKey,
+				opts.Dispatch.SessionScope,
+				opts.Dispatch.SessionAliases,
+			)
+			return al.CompactSession(ctx, opts.SessionKey)
 		}
 	}
 	return rt
