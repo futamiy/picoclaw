@@ -538,6 +538,80 @@ export function EvolutionSection({
   )
 }
 
+interface BackupSectionProps {
+  form: CoreConfigForm
+  onFieldChange: UpdateCoreField
+}
+
+export function BackupSection({ form, onFieldChange }: BackupSectionProps) {
+  const { t } = useTranslation()
+
+  return (
+    <ConfigSectionCard
+      title={t("pages.config.sections.backup")}
+      description={t("pages.config.backup_section_hint")}
+    >
+      <SwitchCardField
+        label={t("pages.config.backup_enabled")}
+        hint={t("pages.config.backup_enabled_hint")}
+        layout="setting-row"
+        checked={form.backupEnabled}
+        onCheckedChange={(checked) => onFieldChange("backupEnabled", checked)}
+      />
+
+      <Field
+        label={t("pages.config.backup_dir")}
+        hint={t("pages.config.backup_dir_hint")}
+        layout="setting-row"
+      >
+        <Input
+          value={form.backupDir}
+          onChange={(e) => onFieldChange("backupDir", e.target.value)}
+          placeholder="~/.picoclaw/backups"
+        />
+      </Field>
+
+      <Field
+        label={t("pages.config.backup_keep")}
+        hint={t("pages.config.backup_keep_hint")}
+        layout="setting-row"
+      >
+        <Input
+          type="number"
+          min={1}
+          value={form.backupKeep}
+          onChange={(e) => onFieldChange("backupKeep", e.target.value)}
+        />
+      </Field>
+
+      <Field
+        label={t("pages.config.backup_interval_hours")}
+        hint={t("pages.config.backup_interval_hours_hint")}
+        layout="setting-row"
+      >
+        <Input
+          type="number"
+          min={1}
+          value={form.backupIntervalHours}
+          onChange={(e) =>
+            onFieldChange("backupIntervalHours", e.target.value)
+          }
+        />
+      </Field>
+
+      <SwitchCardField
+        label={t("pages.config.backup_include_secrets")}
+        hint={t("pages.config.backup_include_secrets_hint")}
+        layout="setting-row"
+        checked={form.backupIncludeSecrets}
+        onCheckedChange={(checked) =>
+          onFieldChange("backupIncludeSecrets", checked)
+        }
+      />
+    </ConfigSectionCard>
+  )
+}
+
 export function MCPSection({
   form,
   onFieldChange,

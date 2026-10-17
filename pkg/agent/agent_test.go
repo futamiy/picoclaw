@@ -3460,15 +3460,15 @@ func TestProcessMessage_ClearCommandClearsRoutedAgentSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("processMessage() error = %v", err)
 	}
-	if response != "Chat history cleared! Memory and context summary retained." {
+	if response != "Chat history cleared!" {
 		t.Fatalf("response = %q, want clear confirmation", response)
 	}
 
 	if got := supportAgent.Sessions.GetHistory(sessionKey); len(got) != 0 {
 		t.Fatalf("support history len = %d, want 0", len(got))
 	}
-	if got := supportAgent.Sessions.GetSummary(sessionKey); got != "support summary" {
-		t.Fatalf("support summary = %q, want preserved summary", got)
+	if got := supportAgent.Sessions.GetSummary(sessionKey); got != "" {
+		t.Fatalf("support summary = %q, want empty", got)
 	}
 	if got := mainAgent.Sessions.GetHistory(sessionKey); len(got) != len(mainHistory) {
 		t.Fatalf("main history len = %d, want %d", len(got), len(mainHistory))

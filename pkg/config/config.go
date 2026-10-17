@@ -48,6 +48,10 @@ type Config struct {
 	Heartbeat HeartbeatConfig `json:"heartbeat"           yaml:"-"`
 	Devices   DevicesConfig   `json:"devices"             yaml:"-"`
 	Voice     VoiceConfig     `json:"voice"               yaml:"-"`
+	// Backup configures full-data backups of the whole PicoClaw home directory.
+	// This is deliberately separate from the memory-only archive under
+	// agents.defaults.memory.backup.
+	Backup FullBackupConfig `json:"backup,omitempty" yaml:"-"`
 	// BuildInfo contains build-time version information
 	BuildInfo BuildInfo `json:"build_info,omitempty" yaml:"-"`
 
@@ -567,6 +571,50 @@ type MemoryBackupConfig struct {
 	DriftKeep int `json:"drift_keep,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_BACKUP_DRIFT_KEEP"`
 }
 
+// FullBackupConfig configures local full-data backups of the whole PicoClaw
+// home directory (config, workspace, memory, sessions, state). It is separate
+// from Agents.Defaults.Memory.Backup, which archives only the workspace memory
+// directory. Automatic backups are OFF by default.
+type FullBackupConfig struct {
+	// Enabled turns on the scheduled full-home backup ticker. Manual backups
+	// always work regardless. Off by default.
+	Enabled bool `json:"enabled" env:"PICOCLAW_BACKUP_ENABLED"`
+	// Dir is where archives are written. Empty uses ~/.picoclaw/backups.
+	Dir string `json:"dir,omitempty" env:"PICOCLAW_BACKUP_DIR"`
+	// Keep is how many archives to retain (oldest pruned). 0 uses the default.
+	Keep int `json:"keep,omitempty" env:"PICOCLAW_BACKUP_KEEP"`
+	// IntervalHours is how often to archive when Enabled (min 1). 0 uses the default.
+	IntervalHours int `json:"interval_hours,omitempty" env:"PICOCLAW_BACKUP_INTERVAL_HOURS"`
+	// IncludeSecrets includes secret-bearing files (.security.yml, auth store)
+	// in the archive. Unset defaults to true so a full backup is complete.
+	IncludeSecrets *bool `json:"include_secrets,omitempty" env:"PICOCLAW_BACKUP_INCLUDE_SECRETS"`
+}
+
+// EffectiveKeep returns the configured archive retention or the default.
+func (b FullBackupConfig) EffectiveKeep() int {
+	if b.Keep > 0 {
+		return b.Keep
+	}
+	return DefaultBackupKeep
+}
+
+// EffectiveIntervalHours returns the configured archive interval or the default.
+func (b FullBackupConfig) EffectiveIntervalHours() int {
+	if b.IntervalHours > 0 {
+		return b.IntervalHours
+	}
+	return DefaultBackupIntervalHour
+}
+
+// EffectiveIncludeSecrets reports whether secret-bearing files are included.
+// It defaults to true when unset.
+func (b FullBackupConfig) EffectiveIncludeSecrets() bool {
+	if b.IncludeSecrets != nil {
+		return *b.IncludeSecrets
+	}
+	return true
+}
+
 const (
 	DefaultMemoryLongTermCharLimit  = 2200
 	DefaultMemoryProfileCharLimit   = 1375
@@ -577,6 +625,8 @@ const (
 	DefaultMemoryBackupKeep         = 20
 	DefaultMemoryBackupIntervalHour = 24
 	DefaultMemoryBackupDriftKeep    = 3
+	DefaultBackupKeep               = 10
+	DefaultBackupIntervalHour       = 24
 	DefaultHonchoBaseURL            = "https://api.honcho.dev"
 	DefaultHonchoUserPeerID         = "user"
 	DefaultMem0BaseURL              = "https://api.mem0.ai"

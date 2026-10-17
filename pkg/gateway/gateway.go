@@ -68,6 +68,7 @@ type services struct {
 	CronService         *cron.CronService
 	HeartbeatService    *heartbeat.HeartbeatService
 	MemoryBackupService *agent.MemoryBackupService
+	FullBackupService   *agent.FullBackupService
 	MediaStore          media.MediaStore
 	ChannelManager      *channels.Manager
 	DeviceService       *devices.Service
@@ -425,6 +426,27 @@ func startMemoryBackupService(runningServices *services, cfg *config.Config) err
 	return nil
 }
 
+// startFullBackupService starts the scheduled full-home backup ticker. It is a
+// no-op when backups are disabled in config.
+func startFullBackupService(runningServices *services, cfg *config.Config) error {
+	bk := cfg.Backup
+	runningServices.FullBackupService = agent.NewFullBackupService(
+		config.GetHome(),
+		bk.Dir,
+		bk.Enabled,
+		time.Duration(bk.EffectiveIntervalHours())*time.Hour,
+		bk.EffectiveKeep(),
+		bk.EffectiveIncludeSecrets(),
+	)
+	if err := runningServices.FullBackupService.Start(); err != nil {
+		return fmt.Errorf("error starting full backup service: %w", err)
+	}
+	if bk.Enabled {
+		fmt.Println("✓ Full backup service started")
+	}
+	return nil
+}
+
 func setupAndStartServices(
 	cfg *config.Config,
 	agentLoop *agent.AgentLoop,
@@ -465,6 +487,10 @@ func setupAndStartServices(
 	fmt.Println("✓ Heartbeat service started")
 
 	if err = startMemoryBackupService(runningServices, cfg); err != nil {
+		return nil, err
+	}
+
+	if err = startFullBackupService(runningServices, cfg); err != nil {
 		return nil, err
 	}
 
@@ -577,6 +603,9 @@ func stopAndCleanupServices(runningServices *services, shutdownTimeout time.Dura
 	}
 	if runningServices.MemoryBackupService != nil {
 		runningServices.MemoryBackupService.Stop()
+	}
+	if runningServices.FullBackupService != nil {
+		runningServices.FullBackupService.Stop()
 	}
 	if runningServices.CronService != nil {
 		runningServices.CronService.Stop()
@@ -723,6 +752,13 @@ func restartServices(
 		runningServices.MemoryBackupService.Stop()
 	}
 	if err = startMemoryBackupService(runningServices, cfg); err != nil {
+		return err
+	}
+
+	if runningServices.FullBackupService != nil {
+		runningServices.FullBackupService.Stop()
+	}
+	if err = startFullBackupService(runningServices, cfg); err != nil {
 		return err
 	}
 

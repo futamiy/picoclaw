@@ -70,9 +70,7 @@ func (m *legacyContextManager) Clear(_ context.Context, sessionKey string) error
 		return fmt.Errorf("sessions not initialized")
 	}
 	agent.Sessions.SetHistory(sessionKey, []providers.Message{})
-	// Preserve the existing summary so that memory (and Honcho recall) remain
-	// usable after /clear: live history tokens drop to ~0, but the running
-	// context summary is retained.
+	agent.Sessions.SetSummary(sessionKey, "")
 	return agent.Sessions.Save(sessionKey)
 }
 

@@ -18,6 +18,7 @@ import {
 import { ConfigChangeNotice } from "@/components/config-change-notice"
 import {
   AgentDefaultsSection,
+  BackupSection,
   CronSection,
   DevicesSection,
   EvolutionSection,
@@ -378,6 +379,14 @@ export function ConfigPage() {
           "Evolution minimum success ratio",
           { min: 0.01, max: 1 },
         )
+        const backupKeep = parseIntField(form.backupKeep, "Backup keep", {
+          min: 1,
+        })
+        const backupIntervalHours = parseIntField(
+          form.backupIntervalHours,
+          "Backup interval",
+          { min: 1 },
+        )
         const mcpDiscoveryValidationEnabled =
           form.mcpEnabled && form.mcpDiscoveryEnabled
         const mcpDiscoveryPatch: Record<string, unknown> = {
@@ -635,6 +644,13 @@ export function ConfigPage() {
             enabled: form.devicesEnabled,
             monitor_usb: form.monitorUSB,
           },
+          backup: {
+            enabled: form.backupEnabled,
+            dir: form.backupDir.trim(),
+            keep: backupKeep,
+            interval_hours: backupIntervalHours,
+            include_secrets: form.backupIncludeSecrets,
+          },
         })
 
         setBaseline(form)
@@ -824,6 +840,8 @@ export function ConfigPage() {
               <RuntimeSection form={form} onFieldChange={updateField} />
 
               <EvolutionSection form={form} onFieldChange={updateField} />
+
+              <BackupSection form={form} onFieldChange={updateField} />
 
               <MCPSection
                 form={form}

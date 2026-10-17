@@ -1166,6 +1166,37 @@ Scheduled tasks persist across restarts and are stored in `~/.picoclaw/workspace
 
 Command cron jobs can execute shell commands. By default, remote channels cannot schedule command jobs. To allow specific remote channels, set `command_allowed_remotes` to entries such as `"telegram"` or `"telegram:1234567890"`; use `"*"` only if every non-empty channel should be allowed. The `"*"` wildcard is potentially dangerous because any remote channel that can talk to PicoClaw can schedule shell commands. This does not bypass `allow_command`, `command_confirm`, or exec safety checks.
 
+### Backup
+
+PicoClaw supports two types of local backups:
+
+- **Memory archive** (Memory settings, `agents.defaults.memory.backup`): zips only `~/.picoclaw/workspace/memory/`. Drift snapshots track fine-grained changes to memory files.
+- **Full backup** (Config settings, top-level `backup`): zips the entire PicoClaw home (`~/.picoclaw/` by default), covering config, workspace, sessions, state, and auth. Use this for a complete, reproducible snapshot.
+
+```json
+{
+  "backup": {
+    "enabled": true,
+    "dir": "~/.picoclaw/backups",
+    "keep": 10,
+    "interval_hours": 24,
+    "include_secrets": true
+  }
+}
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `false` | Scheduled full-home backups. |
+| `dir` | `~/.picoclaw/backups` | Where archives are written (shared with memory archives). |
+| `keep` | `10` | Archives to retain; oldest are pruned. |
+| `interval_hours` | `24` | Interval for scheduled runs. |
+| `include_secrets` | `true` | Include secret-bearing files (`.security.yml`, `auth.json`). |
+
+Memory-only backup settings (`agents.defaults.memory.backup`) are documented in [Memory Guide](memory.md).
+
+
+
 ### Advanced Topics
 
 | Topic | Description |

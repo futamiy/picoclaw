@@ -195,6 +195,39 @@ cannot silently fill the disk. Turn it on in the config or with the
 Disabling the toggle turns off automatic snapshots and scheduled archives.
 Running a manual backup, listing, or restoring is unaffected.
 
+### Full backup (whole PicoClaw home)
+
+A separate **Full backup** archives the entire PicoClaw home directory
+(`~/.picoclaw/` by default), covering config, workspace (including memory),
+sessions, state, and auth. It is distinct from the memory-only archive above.
+
+**Configuration (Config settings)**
+
+```json
+{
+  "backup": {
+    "enabled": true,
+    "dir": "~/.picoclaw/backups",
+    "keep": 10,
+    "interval_hours": 24,
+    "include_secrets": true
+  }
+}
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `false` | Scheduled full-home backups. Manual triggers are not dependent on this. |
+| `dir` | `~/.picoclaw/backups` | Where full-backup archives are written (shared with memory archives). |
+| `keep` | `10` | Archives to retain; oldest are pruned. |
+| `interval_hours` | `24` | Interval for scheduled runs. |
+| `include_secrets` | `true` | Include secret-bearing files (`.security.yml`, `auth.json`) when true. |
+
+Manual full-backup commands/triggers can be added in future iterations. For now,
+the full-home scheduled backups use this top-level `backup` key in Config
+settings. The memory-only backup uses `agents.defaults.memory.backup` in Memory
+settings.
+
 ### CLI
 
 ```bash

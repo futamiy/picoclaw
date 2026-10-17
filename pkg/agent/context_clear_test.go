@@ -7,10 +7,10 @@ import (
 	"github.com/sipeed/picoclaw/pkg/providers"
 )
 
-// TestLegacyClear_PreservesSummary verifies that /clear drops live history
-// (so token usage falls to ~0) while retaining the running context summary so
-// that memory remains usable after the clear.
-func TestLegacyClear_PreservesSummary(t *testing.T) {
+// TestLegacyClear_ClearsSummary verifies that /clear drops live history AND
+// the running context summary, returning the session to a fully cleared state
+// (matching the original pre-summary-preservation behavior).
+func TestLegacyClear_ClearsSummary(t *testing.T) {
 	cfg := testConfig(t)
 	al := newCMTestAgentLoop(cfg)
 
@@ -33,7 +33,7 @@ func TestLegacyClear_PreservesSummary(t *testing.T) {
 	if h := agent.Sessions.GetHistory(sessionKey); len(h) != 0 {
 		t.Fatalf("history after clear = %d messages, want 0", len(h))
 	}
-	if s := agent.Sessions.GetSummary(sessionKey); s != "running summary of earlier conversation" {
-		t.Fatalf("summary after clear = %q, want preserved summary", s)
+	if s := agent.Sessions.GetSummary(sessionKey); s != "" {
+		t.Fatalf("summary after clear = %q, want empty", s)
 	}
 }

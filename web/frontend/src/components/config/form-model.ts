@@ -41,6 +41,11 @@ export interface CoreConfigForm {
   evolutionMinSuccessRatio: string
   evolutionColdPathTrigger: string
   evolutionColdPathTimesText: string
+  backupEnabled: boolean
+  backupDir: string
+  backupKeep: string
+  backupIntervalHours: string
+  backupIncludeSecrets: boolean
 }
 
 export type MCPServerType = "http" | "sse" | "stdio"
@@ -161,6 +166,11 @@ export const EMPTY_FORM: CoreConfigForm = {
   evolutionMinSuccessRatio: "0.7",
   evolutionColdPathTrigger: "after_turn",
   evolutionColdPathTimesText: "",
+  backupEnabled: false,
+  backupDir: "",
+  backupKeep: "10",
+  backupIntervalHours: "24",
+  backupIncludeSecrets: true,
 }
 
 export const EMPTY_LAUNCHER_FORM: LauncherForm = {
@@ -305,6 +315,7 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
   const exec = asRecord(tools.exec)
   const toolFeedback = asRecord(defaults.tool_feedback)
   const experimental = asRecord(defaults.experimental)
+  const backup = asRecord(root.backup)
 
   return {
     workspace: asString(defaults.workspace) || EMPTY_FORM.workspace,
@@ -447,6 +458,20 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
           .filter((value): value is string => typeof value === "string")
           .join("\n")
       : EMPTY_FORM.evolutionColdPathTimesText,
+    backupEnabled:
+      backup.enabled === undefined
+        ? EMPTY_FORM.backupEnabled
+        : asBool(backup.enabled),
+    backupDir: asString(backup.dir),
+    backupKeep: asNumberString(backup.keep, EMPTY_FORM.backupKeep),
+    backupIntervalHours: asNumberString(
+      backup.interval_hours,
+      EMPTY_FORM.backupIntervalHours,
+    ),
+    backupIncludeSecrets:
+      backup.include_secrets === undefined
+        ? EMPTY_FORM.backupIncludeSecrets
+        : asBool(backup.include_secrets),
   }
 }
 
