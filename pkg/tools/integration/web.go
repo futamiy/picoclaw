@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unicode"
@@ -419,7 +420,7 @@ func (p *TavilySearchProvider) Search(
 			"api_key":             apiKey,
 			"query":               query,
 			"search_depth":        "advanced",
-			"include_answer":      false,
+			"include_answer":      "advanced",
 			"include_images":      false,
 			"include_raw_content": false,
 			"max_results":         count,
@@ -467,6 +468,7 @@ func (p *TavilySearchProvider) Search(
 		}
 
 		var searchResp struct {
+			Answer  string `json:"answer"`
 			Results []struct {
 				Title   string `json:"title"`
 				URL     string `json:"url"`
@@ -478,20 +480,30 @@ func (p *TavilySearchProvider) Search(
 			return "", fmt.Errorf("failed to parse response: %w", err)
 		}
 
-		results := searchResp.Results
-		if len(results) == 0 {
+		if len(searchResp.Results) == 0 && strings.TrimSpace(searchResp.Answer) == "" {
 			return fmt.Sprintf("No results for: %s", query), nil
 		}
 
 		var lines []string
-		lines = append(lines, fmt.Sprintf("Results for: %s (via Tavily)", query))
-		for i, item := range results {
-			if i >= count {
-				break
+		if answer := strings.TrimSpace(searchResp.Answer); answer != "" {
+			lines = append(lines, fmt.Sprintf("Answer for: %s (via Tavily)", query))
+			lines = append(lines, answer)
+			lines = append(lines, "")
+		}
+		if len(searchResp.Results) > 0 {
+			if len(lines) == 0 {
+				lines = append(lines, fmt.Sprintf("Results for: %s (via Tavily)", query))
+			} else {
+				lines = append(lines, "Sources:")
 			}
-			lines = append(lines, fmt.Sprintf("%d. %s\n   %s", i+1, item.Title, item.URL))
-			if item.Content != "" {
-				lines = append(lines, fmt.Sprintf("   %s", item.Content))
+			for i, item := range searchResp.Results {
+				if i >= count {
+					break
+				}
+				lines = append(lines, fmt.Sprintf("%d. %s\n   %s", i+1, item.Title, item.URL))
+				if item.Content != "" && strings.TrimSpace(searchResp.Answer) == "" {
+					lines = append(lines, fmt.Sprintf("   %s", item.Content))
+				}
 			}
 		}
 
@@ -1104,18 +1116,18 @@ func (p *PerplexitySearchProvider) Search(
 			"messages": []map[string]string{
 				{
 					"role":    "system",
-					"content": "You are a search assistant. Provide concise search results with titles, URLs, and brief descriptions in the following format:\n1. Title\n   URL\n   Description\n\nDo not add extra commentary.",
+					"content": "You are a search assistant. Synthesize a concise answer to the user's query based on the search results. Cite sources inline with their URLs. Do not output a numbered list of links.",
 				},
 				{
 					"role": "user",
 					"content": fmt.Sprintf(
-						"Search for: %s. Provide up to %d relevant results.",
+						"Search for: %s. Cover up to %d relevant sources.",
 						query,
 						count,
 					),
 				},
 			},
-			"max_tokens": 1000,
+			"max_tokens": 2000,
 		}
 		if recencyFilter := mapPerplexityRecencyFilter(rangeCode); recencyFilter != "" {
 			payload["search_recency_filter"] = recencyFilter
@@ -1182,7 +1194,7 @@ func (p *PerplexitySearchProvider) Search(
 		}
 
 		return fmt.Sprintf(
-			"Results for: %s (via Perplexity)\n%s",
+			"Answer for: %s (via Perplexity)\n%s",
 			query,
 			searchResp.Choices[0].Message.Content,
 		), nil
@@ -1461,6 +1473,15 @@ type WebSearchTool struct {
 	provider         SearchProvider
 	maxResults       int
 	providerResolver func(query string) (SearchProvider, int)
+	hybrid           bool
+	conventional     []webSearchPoolEntry
+	reasoning        []webSearchPoolEntry
+}
+
+type webSearchPoolEntry struct {
+	name       string
+	provider   SearchProvider
+	maxResults int
 }
 
 type WebSearchToolOptions struct {
@@ -1563,9 +1584,14 @@ var (
 		"searxng",
 		"glm_search",
 		"baidu_search",
+		"auto_legacy",
 	}
 	autoPrimaryWebSearchProviders  = []string{"perplexity", "brave", "kagi", "searxng", "tavily", "gemini"}
 	autoFallbackWebSearchProviders = []string{"baidu_search", "glm_search"}
+
+	// Hybrid auto pools (conventional = link/sniplet, reasoning = sintesis jawaban).
+	conventionalWebSearchPool = []string{"brave", "duckduckgo", "sogou", "searxng", "kagi", "baidu_search"}
+	reasoningWebSearchPool    = []string{"perplexity", "tavily", "gemini", "glm_search"}
 )
 
 func isKnownWebSearchProvider(name string) bool {
@@ -1620,36 +1646,77 @@ func (opts WebSearchToolOptions) resolveProviderName(query string) (string, erro
 	if providerName != "" && providerName != "auto" && opts.providerReady(providerName) {
 		return providerName, nil
 	}
+	return opts.resolveLegacyProviderName(query), nil
+}
 
+// resolveLegacyProviderName is the original single-provider auto selection,
+// preserved verbatim as the "auto_legacy" mode.
+func (opts WebSearchToolOptions) resolveLegacyProviderName(query string) string {
 	sogouReady := opts.providerReady("sogou")
 	duckReady := opts.providerReady("duckduckgo")
 
 	for _, name := range autoPrimaryWebSearchProviders {
 		if opts.providerReady(name) {
-			return name, nil
+			return name
 		}
 	}
 
 	if sogouReady && duckReady {
 		if prefersDuckDuckGoQuery(query) {
-			return "duckduckgo", nil
+			return "duckduckgo"
 		}
-		return "sogou", nil
+		return "sogou"
 	}
 	if sogouReady {
-		return "sogou", nil
+		return "sogou"
 	}
 	if duckReady {
-		return "duckduckgo", nil
+		return "duckduckgo"
 	}
 
 	for _, name := range autoFallbackWebSearchProviders {
 		if opts.providerReady(name) {
-			return name, nil
+			return name
 		}
 	}
 
-	return "", nil
+	return ""
+}
+
+const (
+	strategyAuto         = "auto"
+	strategyConventional = "conventional"
+	strategyReasoning    = "reasoning"
+)
+
+var (
+	// Strong signal that the user wants a fresh link/news listing.
+	strategyNewsRe = regexp.MustCompile(
+		`(?i)\b(breaking|latest|headline[s]?|news|update[s]?|today|yesterday|this (week|month)|` +
+			`berita|terbaru|hari ini|kemarin|pekan ini|minggu ini|baru saja)\b|\b\d+\s*(berita|artikel|headlines?|news)\b`)
+	// Strong signal that the user wants an explanation/synthesis.
+	strategySynthRe = regexp.MustCompile(
+		`(?i)\b(what|why|how|who|explain|compare|difference|versus|vs|should|` +
+			`apa (itu|sih)|siapa|kenapa|mengapa|bagaimana|jelaskan|bandingkan|perbedaan|trivia)\b`)
+)
+
+// resolveStrategy picks the provider class for hybrid auto mode.
+// A strong heuristic signal in the query wins over the LLM-provided hint
+// (weaker models frequently pick the wrong strategy); the hint only decides
+// when the heuristic is neutral. See docs/adr/0001.
+func resolveStrategy(query, hint string) string {
+	if strategyNewsRe.MatchString(query) {
+		return strategyConventional
+	}
+	if strategySynthRe.MatchString(query) {
+		return strategyAuto
+	}
+	switch normalized := strings.ToLower(strings.TrimSpace(hint)); normalized {
+	case strategyConventional, strategyReasoning, strategyAuto:
+		return normalized
+	default:
+		return strategyAuto
+	}
 }
 
 func (opts WebSearchToolOptions) providerByName(name string) (SearchProvider, int, error) {
@@ -1871,7 +1938,12 @@ func prefersDuckDuckGoQuery(text string) bool {
 	return false
 }
 
-func (opts WebSearchToolOptions) buildProviderResolver() (func(query string) (SearchProvider, int), error) {
+func (opts WebSearchToolOptions) buildProviderResolver() (
+	func(query string) (SearchProvider, int),
+	map[string]SearchProvider,
+	map[string]int,
+	error,
+) {
 	providersByName := make(map[string]SearchProvider, len(knownWebSearchProviders))
 	maxResultsByName := make(map[string]int, len(knownWebSearchProviders))
 
@@ -1881,7 +1953,7 @@ func (opts WebSearchToolOptions) buildProviderResolver() (func(query string) (Se
 		}
 		provider, maxResults, err := opts.providerByName(name)
 		if err != nil {
-			return nil, err
+			return nil, nil, nil, err
 		}
 		if provider == nil {
 			continue
@@ -1890,7 +1962,7 @@ func (opts WebSearchToolOptions) buildProviderResolver() (func(query string) (Se
 		maxResultsByName[name] = maxResults
 	}
 
-	return func(query string) (SearchProvider, int) {
+	resolver := func(query string) (SearchProvider, int) {
 		name, err := opts.resolveProviderName(query)
 		if err != nil {
 			return nil, 0
@@ -1900,11 +1972,32 @@ func (opts WebSearchToolOptions) buildProviderResolver() (func(query string) (Se
 			return nil, 0
 		}
 		return provider, maxResultsByName[name]
-	}, nil
+	}
+	return resolver, providersByName, maxResultsByName, nil
+}
+
+func buildWebSearchPool(
+	names []string,
+	providers map[string]SearchProvider,
+	maxResultsByName map[string]int,
+) []webSearchPoolEntry {
+	pool := make([]webSearchPoolEntry, 0, len(names))
+	for _, name := range names {
+		provider, ok := providers[name]
+		if !ok {
+			continue
+		}
+		pool = append(pool, webSearchPoolEntry{
+			name:       name,
+			provider:   provider,
+			maxResults: maxResultsByName[name],
+		})
+	}
+	return pool
 }
 
 func NewWebSearchTool(opts WebSearchToolOptions) (*WebSearchTool, error) {
-	resolver, err := opts.buildProviderResolver()
+	resolver, providersByName, maxResultsByName, err := opts.buildProviderResolver()
 	if err != nil {
 		return nil, err
 	}
@@ -1917,6 +2010,9 @@ func NewWebSearchTool(opts WebSearchToolOptions) (*WebSearchTool, error) {
 		provider:         provider,
 		maxResults:       maxResults,
 		providerResolver: resolver,
+		hybrid:           opts.normalizedProviderName() == "auto",
+		conventional:     buildWebSearchPool(conventionalWebSearchPool, providersByName, maxResultsByName),
+		reasoning:        buildWebSearchPool(reasoningWebSearchPool, providersByName, maxResultsByName),
 	}, nil
 }
 
@@ -1925,7 +2021,7 @@ func (t *WebSearchTool) Name() string {
 }
 
 func (t *WebSearchTool) Description() string {
-	return "Search the web for current information. Supports query, count, and an optional temporal range filter. Returns titles, URLs, and snippets from search results."
+	return "Search the web for current information. Supports query, count, an optional temporal range filter, and a strategy hint that selects the provider class (conventional link search vs research synthesis). Returns search results, with a synthesized answer when a research provider is used."
 }
 
 func (t *WebSearchTool) Parameters() map[string]any {
@@ -1947,6 +2043,11 @@ func (t *WebSearchTool) Parameters() map[string]any {
 				"description": "Optional time filter: d (day), w (week), m (month), y (year)",
 				"enum":        []string{"d", "w", "m", "y"},
 			},
+			"strategy": map[string]any{
+				"type":        "string",
+				"description": "Provider class hint: conventional = link/news results only, reasoning = synthesized answer, auto = research answer first with conventional fact-check (default)",
+				"enum":        []string{strategyAuto, strategyConventional, strategyReasoning},
+			},
 		},
 		"required": []string{"query"},
 	}
@@ -1958,6 +2059,15 @@ func (t *WebSearchTool) Execute(ctx context.Context, args map[string]any) *ToolR
 		return ErrorResult("query is required")
 	}
 	query = strings.TrimSpace(query)
+
+	rangeCode, err := webSearchRangeFromArgs(args)
+	if err != nil {
+		return ErrorResult(err.Error())
+	}
+
+	if t.hybrid {
+		return t.executeHybrid(ctx, query, args, rangeCode)
+	}
 
 	provider := t.provider
 	maxResults := t.maxResults
@@ -1977,21 +2087,6 @@ func (t *WebSearchTool) Execute(ctx context.Context, args map[string]any) *ToolR
 		count = min(int(count64), maxResults)
 	}
 
-	rangeCode, err := normalizeSearchRange("")
-	if err != nil {
-		return ErrorResult(err.Error())
-	}
-	if rawRange, exists := args["range"]; exists {
-		rangeStr, ok := rawRange.(string)
-		if !ok {
-			return ErrorResult("range must be a string")
-		}
-		rangeCode, err = normalizeSearchRange(rangeStr)
-		if err != nil {
-			return ErrorResult(err.Error())
-		}
-	}
-
 	result, err := provider.Search(ctx, query, count, rangeCode)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("search failed: %v", err))
@@ -2000,6 +2095,164 @@ func (t *WebSearchTool) Execute(ctx context.Context, args map[string]any) *ToolR
 	return &ToolResult{
 		ForLLM:  result,
 		ForUser: result,
+	}
+}
+
+func webSearchRangeFromArgs(args map[string]any) (string, error) {
+	rangeCode, err := normalizeSearchRange("")
+	if err != nil {
+		return "", err
+	}
+	if rawRange, exists := args["range"]; exists {
+		rangeStr, ok := rawRange.(string)
+		if !ok {
+			return "", errors.New("range must be a string")
+		}
+		rangeCode, err = normalizeSearchRange(rangeStr)
+		if err != nil {
+			return "", err
+		}
+	}
+	return rangeCode, nil
+}
+
+func firstReadyProvider(pool []webSearchPoolEntry) (webSearchPoolEntry, bool) {
+	if len(pool) == 0 {
+		return webSearchPoolEntry{}, false
+	}
+	return pool[0], true
+}
+
+func (t *WebSearchTool) executeHybrid(
+	ctx context.Context,
+	query string,
+	args map[string]any,
+	rangeCode string,
+) *ToolResult {
+	hint, _ := args["strategy"].(string)
+	strategy := resolveStrategy(query, hint)
+
+	conventional, hasConventional := firstReadyProvider(t.conventional)
+	reasoning, hasReasoning := firstReadyProvider(t.reasoning)
+
+	if !hasConventional && !hasReasoning {
+		return ErrorResult("search provider is not configured")
+	}
+
+	switch strategy {
+	case strategyConventional:
+		if hasConventional {
+			return t.searchOne(ctx, conventional, query, args, rangeCode)
+		}
+		return t.searchOne(ctx, reasoning, query, args, rangeCode)
+	case strategyReasoning:
+		if hasReasoning {
+			return t.searchOne(ctx, reasoning, query, args, rangeCode)
+		}
+		return t.searchOne(ctx, conventional, query, args, rangeCode)
+	default: // auto: research answer first, conventional as fact-check
+		if !hasReasoning {
+			return t.searchOne(ctx, conventional, query, args, rangeCode)
+		}
+		if !hasConventional {
+			return t.searchOne(ctx, reasoning, query, args, rangeCode)
+		}
+		return t.searchBoth(ctx, reasoning, conventional, query, args, rangeCode)
+	}
+}
+
+func (t *WebSearchTool) searchOne(
+	ctx context.Context,
+	entry webSearchPoolEntry,
+	query string,
+	args map[string]any,
+	rangeCode string,
+) *ToolResult {
+	count64, err := getInt64Arg(args, "count", int64(entry.maxResults))
+	if err != nil {
+		return ErrorResult(err.Error())
+	}
+	count := entry.maxResults
+	if count64 > 0 && count64 <= 10 {
+		count = min(int(count64), entry.maxResults)
+	}
+
+	result, err := entry.provider.Search(ctx, query, count, rangeCode)
+	if err != nil {
+		return ErrorResult(fmt.Sprintf("search failed: %v", err))
+	}
+	return &ToolResult{
+		ForLLM:  result,
+		ForUser: result,
+	}
+}
+
+func (t *WebSearchTool) searchBoth(
+	ctx context.Context,
+	reasoning, conventional webSearchPoolEntry,
+	query string,
+	args map[string]any,
+	rangeCode string,
+) *ToolResult {
+	count64, err := getInt64Arg(args, "count", 0)
+	if err != nil {
+		return ErrorResult(err.Error())
+	}
+	countFor := func(maxResults int) int {
+		if count64 > 0 && count64 <= 10 {
+			return min(int(count64), maxResults)
+		}
+		return maxResults
+	}
+
+	type outcome struct {
+		entry webSearchPoolEntry
+		text  string
+		err   error
+	}
+	run := func(entry webSearchPoolEntry) outcome {
+		text, err := entry.provider.Search(ctx, query, countFor(entry.maxResults), rangeCode)
+		return outcome{entry: entry, text: text, err: err}
+	}
+
+	var reas, conv outcome
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		reas = run(reasoning)
+	}()
+	go func() {
+		defer wg.Done()
+		conv = run(conventional)
+	}()
+	wg.Wait()
+
+	if reas.err != nil && conv.err != nil {
+		return ErrorResult(fmt.Sprintf(
+			"search failed: research provider %s: %v; conventional provider %s: %v",
+			reas.entry.name, reas.err, conv.entry.name, conv.err,
+		))
+	}
+
+	var parts []string
+	if reas.err != nil {
+		parts = append(parts, fmt.Sprintf(
+			"note: research provider %s failed: %v", reas.entry.name, reas.err))
+	} else {
+		parts = append(parts, "[Research]\n"+reas.text)
+	}
+	if conv.err != nil {
+		parts = append(parts, fmt.Sprintf(
+			"note: conventional provider %s failed: %v", conv.entry.name, conv.err))
+	} else {
+		parts = append(parts, "[Conventional — fact check]\n"+conv.text)
+	}
+
+	merged := strings.Join(parts, "\n\n")
+	return &ToolResult{
+		ForLLM:  merged,
+		ForUser: merged,
 	}
 }
 

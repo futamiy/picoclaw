@@ -400,6 +400,7 @@
         "max_results": 5
       },
       "provider": "auto",
+      "_comment_provider": "auto = hybrid (research + conventional pools), auto_legacy = previous auto, or a fixed id: sogou|duckduckgo|gemini|brave|tavily|kagi|perplexity|searxng|glm_search|baidu_search",
       "sogou": {
         "enabled": true,
         "max_results": 5

@@ -2415,3 +2415,233 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
 }
+
+type errSearchProvider struct {
+	err error
+}
+
+func (p *errSearchProvider) Search(
+	_ context.Context,
+	_ string,
+	_ int,
+	_ string,
+) (string, error) {
+	return "", p.err
+}
+
+func hybridStubTool(reasoning, conventional SearchProvider) *WebSearchTool {
+	return &WebSearchTool{
+		hybrid: true,
+		reasoning: []webSearchPoolEntry{
+			{name: "perplexity", provider: reasoning, maxResults: 3},
+		},
+		conventional: []webSearchPoolEntry{
+			{name: "brave", provider: conventional, maxResults: 5},
+		},
+	}
+}
+
+func TestResolveStrategy_HeuristicBeatsHint(t *testing.T) {
+	tests := []struct {
+		name   string
+		query  string
+		hint   string
+		expect string
+	}{
+		{"news signal conventional", "5 berita terbaru hari ini", "", strategyConventional},
+		{"news signal beats reasoning hint", "latest news about picoclaw", "reasoning", strategyConventional},
+		{"synthesis signal auto", "apa itu quantum computing", "", strategyAuto},
+		{"synthesis signal beats conventional hint", "why is the sky blue", "conventional", strategyAuto},
+		{"neutral uses hint conventional", "picoclaw", "conventional", strategyConventional},
+		{"neutral uses hint reasoning", "picoclaw", "reasoning", strategyReasoning},
+		{"neutral no hint defaults auto", "picoclaw", "", strategyAuto},
+		{"neutral invalid hint defaults auto", "picoclaw", "banana", strategyAuto},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveStrategy(tt.query, tt.hint); got != tt.expect {
+				t.Fatalf("resolveStrategy(%q, %q) = %q, want %q", tt.query, tt.hint, got, tt.expect)
+			}
+		})
+	}
+}
+
+func TestWebTool_HybridAuto_MergesBothPools(t *testing.T) {
+	reas := &stubSearchProvider{result: "synthesized answer"}
+	conv := &stubSearchProvider{result: "link listing"}
+	tool := hybridStubTool(reas, conv)
+
+	result := tool.Execute(context.Background(), map[string]any{"query": "picoclaw architecture"})
+	if result.IsError {
+		t.Fatalf("Execute() error: %s", result.ForLLM)
+	}
+	if len(reas.calls) != 1 || len(conv.calls) != 1 {
+		t.Fatalf("expected both pools called once, got reasoning=%d conventional=%d", len(reas.calls), len(conv.calls))
+	}
+	if !strings.Contains(result.ForLLM, "[Research]\nsynthesized answer") {
+		t.Fatalf("missing Research section: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "[Conventional — fact check]\nlink listing") {
+		t.Fatalf("missing Conventional section: %s", result.ForLLM)
+	}
+	if strings.Index(result.ForLLM, "[Research]") > strings.Index(result.ForLLM, "[Conventional") {
+		t.Fatalf("Research section must come first: %s", result.ForLLM)
+	}
+}
+
+func TestWebTool_HybridAuto_PartialFailureKeepsOtherSide(t *testing.T) {
+	reas := &errSearchProvider{err: fmt.Errorf("boom")}
+	conv := &stubSearchProvider{result: "link listing"}
+	tool := hybridStubTool(reas, conv)
+
+	result := tool.Execute(context.Background(), map[string]any{"query": "picoclaw"})
+	if result.IsError {
+		t.Fatalf("Execute() should succeed with partial result: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "note: research provider perplexity failed: boom") {
+		t.Fatalf("missing failure note: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "[Conventional — fact check]\nlink listing") {
+		t.Fatalf("missing conventional section: %s", result.ForLLM)
+	}
+}
+
+func TestWebTool_HybridAuto_BothFailedReturnsError(t *testing.T) {
+	tool := hybridStubTool(
+		&errSearchProvider{err: fmt.Errorf("reas down")},
+		&errSearchProvider{err: fmt.Errorf("conv down")},
+	)
+
+	result := tool.Execute(context.Background(), map[string]any{"query": "picoclaw"})
+	if !result.IsError {
+		t.Fatalf("expected error when both pools fail: %s", result.ForLLM)
+	}
+}
+
+func TestWebTool_HybridAuto_StrategyHintRoutesSinglePool(t *testing.T) {
+	reas := &stubSearchProvider{result: "synthesized answer"}
+	conv := &stubSearchProvider{result: "link listing"}
+	tool := hybridStubTool(reas, conv)
+
+	result := tool.Execute(context.Background(), map[string]any{
+		"query":    "picoclaw",
+		"strategy": "conventional",
+	})
+	if result.IsError {
+		t.Fatalf("Execute() error: %s", result.ForLLM)
+	}
+	if len(conv.calls) != 1 || len(reas.calls) != 0 {
+		t.Fatalf("conventional strategy should only call conventional, got conv=%d reas=%d",
+			len(conv.calls), len(reas.calls))
+	}
+	if strings.Contains(result.ForLLM, "[Research]") {
+		t.Fatalf("single-pool result must not have sections: %s", result.ForLLM)
+	}
+}
+
+func TestWebTool_HybridAuto_NewsQueryIgnoresReasoningHint(t *testing.T) {
+	reas := &stubSearchProvider{result: "synthesized answer"}
+	conv := &stubSearchProvider{result: "link listing"}
+	tool := hybridStubTool(reas, conv)
+
+	result := tool.Execute(context.Background(), map[string]any{
+		"query":    "5 berita terbaru tentang picoclaw",
+		"strategy": "reasoning",
+	})
+	if result.IsError {
+		t.Fatalf("Execute() error: %s", result.ForLLM)
+	}
+	if len(conv.calls) != 1 || len(reas.calls) != 0 {
+		t.Fatalf("news query must win over reasoning hint, got conv=%d reas=%d",
+			len(conv.calls), len(reas.calls))
+	}
+}
+
+func TestWebTool_HybridAuto_FallsBackAcrossPools(t *testing.T) {
+	reas := &stubSearchProvider{result: "synthesized answer"}
+	tool := &WebSearchTool{
+		hybrid: true,
+		reasoning: []webSearchPoolEntry{
+			{name: "tavily", provider: reas, maxResults: 3},
+		},
+	}
+
+	result := tool.Execute(context.Background(), map[string]any{
+		"query":    "picoclaw",
+		"strategy": "conventional",
+	})
+	if result.IsError {
+		t.Fatalf("Execute() error: %s", result.ForLLM)
+	}
+	if len(reas.calls) != 1 {
+		t.Fatalf("expected fallback to reasoning pool, calls=%d", len(reas.calls))
+	}
+}
+
+func TestWebTool_ExplicitProviderIgnoresStrategyHint(t *testing.T) {
+	conv := &stubSearchProvider{result: "link listing"}
+	tool := &WebSearchTool{
+		provider:   conv,
+		maxResults: 5,
+		providerResolver: func(string) (SearchProvider, int) {
+			return conv, 5
+		},
+	}
+
+	result := tool.Execute(context.Background(), map[string]any{
+		"query":    "apa itu picoclaw",
+		"strategy": "conventional",
+	})
+	if result.IsError {
+		t.Fatalf("Execute() error: %s", result.ForLLM)
+	}
+	if len(conv.calls) != 1 {
+		t.Fatalf("explicit provider should run once, calls=%d", len(conv.calls))
+	}
+	if strings.Contains(result.ForLLM, "[Research]") {
+		t.Fatalf("explicit provider output must not be sectioned: %s", result.ForLLM)
+	}
+}
+
+func TestAutoLegacyMatchesAutoResolution(t *testing.T) {
+	opts := WebSearchToolOptions{
+		BraveEnabled:    true,
+		BraveAPIKeys:    []string{"k"},
+		BraveMaxResults: 5,
+		TavilyEnabled:   true,
+		TavilyAPIKeys:   []string{"k"},
+		Provider:        "auto",
+	}
+	autoName, err := ResolveWebSearchProviderName(opts, "picoclaw")
+	if err != nil {
+		t.Fatalf("ResolveWebSearchProviderName(auto) error: %v", err)
+	}
+	opts.Provider = "auto_legacy"
+	legacyName, err := ResolveWebSearchProviderName(opts, "picoclaw")
+	if err != nil {
+		t.Fatalf("ResolveWebSearchProviderName(auto_legacy) error: %v", err)
+	}
+	if autoName != legacyName {
+		t.Fatalf("auto=%q and auto_legacy=%q must resolve identically", autoName, legacyName)
+	}
+	if autoName != "brave" {
+		t.Fatalf("auto resolved %q, want brave (first ready primary after perplexity)", autoName)
+	}
+}
+
+func TestWebTool_AutoLegacyUsesResolverPath(t *testing.T) {
+	tool, err := NewWebSearchTool(WebSearchToolOptions{
+		Provider:        "auto_legacy",
+		SogouEnabled:    true,
+		SogouMaxResults: 5,
+	})
+	if err != nil {
+		t.Fatalf("NewWebSearchTool() error: %v", err)
+	}
+	if tool.hybrid {
+		t.Fatalf("auto_legacy must not be hybrid")
+	}
+	if _, ok := tool.provider.(*SogouSearchProvider); !ok {
+		t.Fatalf("auto_legacy provider = %T, want *SogouSearchProvider", tool.provider)
+	}
+}

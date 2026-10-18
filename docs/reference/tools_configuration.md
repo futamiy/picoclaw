@@ -195,6 +195,7 @@ Kagi API usage may be billed or limited separately from a normal Kagi subscripti
 
 | Config                   | Type     | Default | Description                                                    |
 |--------------------------|----------|---------|----------------------------------------------------------------|
+| `provider`               | string   | `auto`  | Active search provider: `auto` (hybrid — research + conventional pools), `auto_legacy` (previous auto behavior), or a fixed provider id |
 | `prefer_native`          | bool     | true    | Prefer provider's native search over configured search engines |
 | `private_host_whitelist` | string[] | `[]`    | Private/internal hosts allowed for web fetching                |
 
@@ -207,6 +208,7 @@ At runtime, the `web_search` tool accepts the following parameters:
 | `query` | string | yes | Search query string |
 | `count` | integer | no | Number of results to return. Default: `10`, max: `10` |
 | `range` | string | no | Optional time filter: `d` (day), `w` (week), `m` (month), `y` (year) |
+| `strategy` | string | no | Provider class hint when `provider` is `auto`: `auto` (default; research answer plus conventional fact-check), `conventional` (link/news results only), `reasoning` (synthesized answer only). A strong keyword signal in the query (news vs explanation) overrides this hint. |
 
 If `range` is omitted, PicoClaw performs an unrestricted search.
 For Kagi, `d`, `w`, and `m` map to Kagi lens `time_relative`; `y` maps to a lens `time_after` date one year before the current day.

@@ -557,6 +557,8 @@ func normalizeWebSearchProvider(provider string) string {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "", "auto":
 		return "auto"
+	case "auto_legacy":
+		return "auto_legacy"
 	case "sogou",
 		"brave",
 		"tavily",
@@ -660,10 +662,16 @@ func buildWebSearchConfigResponse(cfg *config.Config) webSearchConfigResponse {
 	providers := []webSearchProviderOption{
 		{
 			ID:         "auto",
-			Label:      "Auto",
+			Label:      "Auto (Hybrid)",
 			Configured: current != "",
 			Current: cfg.Tools.Web.Provider == "" ||
 				cfg.Tools.Web.Provider == "auto",
+		},
+		{
+			ID:         "auto_legacy",
+			Label:      "Auto (Legacy)",
+			Configured: current != "",
+			Current:    cfg.Tools.Web.Provider == "auto_legacy",
 		},
 		{
 			ID:         "sogou",
