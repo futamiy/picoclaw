@@ -1,8 +1,9 @@
 import { IconPlus, IconTrash } from "@tabler/icons-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 
+import { launcherFetch } from "@/api/http"
 import {
   type CoreConfigForm,
   DM_SCOPE_OPTIONS,
@@ -538,27 +539,78 @@ export function EvolutionSection({
   )
 }
 
+interface BackupArchive {
+  path: string
+  name: string
+  size: number
+  mod_time: string
+}
+
 interface BackupSectionProps {
   form: CoreConfigForm
   onFieldChange: UpdateCoreField
 }
 
+function formatArchiveSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 B"
+  }
+  const units = ["B", "KB", "MB", "GB"]
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+  return `${(bytes / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${units[i]}`
+}
+
 export function BackupSection({ form, onFieldChange }: BackupSectionProps) {
   const { t } = useTranslation()
+  const [archives, setArchives] = useState<BackupArchive[]>([])
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+
+  const refresh = async () => {
+    try {
+      const res = await launcherFetch("/api/backup/full")
+      if (!res.ok) {
+        throw new Error(String(res.status))
+      }
+      const data = await res.json()
+      setArchives(Array.isArray(data.backups) ? data.backups : [])
+    } catch {
+      setArchives([])
+    }
+  }
+
+  useEffect(() => {
+    void refresh()
+  }, [])
+
+  const runBackup = async () => {
+    setBusy(true)
+    setMessage(null)
+    try {
+      const res = await launcherFetch("/api/backup/full", { method: "POST" })
+      if (!res.ok) {
+        setMessage((await res.text()) || t("pages.config.backup_failed"))
+        return
+      }
+      const data = await res.json()
+      setMessage(
+        t("pages.config.backup_created", {
+          name: typeof data?.path === "string" ? data.path.split("/").pop() : "",
+        }),
+      )
+      await refresh()
+    } catch {
+      setMessage(t("pages.config.backup_failed"))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <ConfigSectionCard
       title={t("pages.config.sections.backup")}
       description={t("pages.config.backup_section_hint")}
     >
-      <SwitchCardField
-        label={t("pages.config.backup_enabled")}
-        hint={t("pages.config.backup_enabled_hint")}
-        layout="setting-row"
-        checked={form.backupEnabled}
-        onCheckedChange={(checked) => onFieldChange("backupEnabled", checked)}
-      />
-
       <Field
         label={t("pages.config.backup_dir")}
         hint={t("pages.config.backup_dir_hint")}
@@ -584,21 +636,6 @@ export function BackupSection({ form, onFieldChange }: BackupSectionProps) {
         />
       </Field>
 
-      <Field
-        label={t("pages.config.backup_interval_hours")}
-        hint={t("pages.config.backup_interval_hours_hint")}
-        layout="setting-row"
-      >
-        <Input
-          type="number"
-          min={1}
-          value={form.backupIntervalHours}
-          onChange={(e) =>
-            onFieldChange("backupIntervalHours", e.target.value)
-          }
-        />
-      </Field>
-
       <SwitchCardField
         label={t("pages.config.backup_include_secrets")}
         hint={t("pages.config.backup_include_secrets_hint")}
@@ -608,6 +645,46 @@ export function BackupSection({ form, onFieldChange }: BackupSectionProps) {
           onFieldChange("backupIncludeSecrets", checked)
         }
       />
+
+      <Field label={t("pages.config.backup_now")} layout="setting-row">
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={runBackup}
+              disabled={busy}
+            >
+              {busy
+                ? t("pages.config.backup_running")
+                : t("pages.config.backup_now")}
+            </Button>
+            {message && (
+              <span className="text-xs text-muted-foreground">{message}</span>
+            )}
+          </div>
+          <div className="flex flex-col gap-1">
+            {archives.length === 0 ? (
+              <span className="text-xs text-muted-foreground">
+                {t("pages.config.backup_empty")}
+              </span>
+            ) : (
+              archives.map((a) => (
+                <div
+                  key={a.path}
+                  className="flex items-center justify-between gap-3 font-mono text-xs"
+                >
+                  <span className="truncate">{a.name}</span>
+                  <span className="shrink-0 text-muted-foreground">
+                    {formatArchiveSize(a.size)} ·{" "}
+                    {new Date(a.mod_time).toLocaleString()}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </Field>
     </ConfigSectionCard>
   )
 }

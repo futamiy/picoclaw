@@ -100,10 +100,7 @@ export function RetainDBSettings({
         </SettingRow>
 
         <SettingRow
-          label={t(
-            "pages.agent.tools.memory.retaindb.namespace",
-            "Namespace",
-          )}
+          label={t("pages.agent.tools.memory.retaindb.namespace", "Namespace")}
           description={t(
             "pages.agent.tools.memory.retaindb.namespace_hint",
             "Scopes stored data. Empty uses the agent ID.",
@@ -117,6 +114,21 @@ export function RetainDBSettings({
               "pages.agent.tools.memory.retaindb.namespace_placeholder",
               "Agent ID",
             )}
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t("pages.agent.tools.memory.retaindb.user_id", "User ID")}
+          description={t(
+            "pages.agent.tools.memory.retaindb.user_id_hint",
+            "Scopes recalled memories to the human user.",
+          )}
+        >
+          <Input
+            className="bg-muted/40 hover:bg-muted/60 focus-visible:bg-background focus-visible:border-border/80 focus-visible:ring-foreground/5 w-full rounded-xl border-transparent shadow-none transition-all duration-300 sm:w-64"
+            value={draft.user_id ?? ""}
+            onChange={(event) => onUpdate({ user_id: event.target.value })}
+            placeholder="user"
           />
         </SettingRow>
 
@@ -137,6 +149,64 @@ export function RetainDBSettings({
             value={draft.sync_every_turns}
             onChange={(event) =>
               onUpdate({ sync_every_turns: Number(event.target.value) })
+            }
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t("pages.agent.tools.memory.retaindb.recall", "Recall Memory")}
+          description={t(
+            "pages.agent.tools.memory.retaindb.recall_hint",
+            "Inject the user profile and relevant memories into the prompt before each turn.",
+          )}
+        >
+          <Switch
+            checked={draft.recall_mode !== "off"}
+            onCheckedChange={(checked) =>
+              onUpdate({ recall_mode: checked ? "hybrid" : "off" })
+            }
+            className="data-[state=checked]:shadow-xs"
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t(
+            "pages.agent.tools.memory.retaindb.context_cadence",
+            "Recall Cadence",
+          )}
+          description={t(
+            "pages.agent.tools.memory.retaindb.context_cadence_hint",
+            "Refresh recalled memories once every N completed turns.",
+          )}
+        >
+          <Input
+            type="number"
+            min={1}
+            className="bg-muted/40 hover:bg-muted/60 focus-visible:bg-background focus-visible:border-border/80 focus-visible:ring-foreground/5 w-full rounded-xl border-transparent shadow-none transition-all duration-300 sm:w-32"
+            value={draft.context_cadence}
+            onChange={(event) =>
+              onUpdate({ context_cadence: Number(event.target.value) })
+            }
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t(
+            "pages.agent.tools.memory.retaindb.recall_limit",
+            "Recall Limit",
+          )}
+          description={t(
+            "pages.agent.tools.memory.retaindb.recall_limit_hint",
+            "Maximum memories fetched per recall.",
+          )}
+        >
+          <Input
+            type="number"
+            min={1}
+            className="bg-muted/40 hover:bg-muted/60 focus-visible:bg-background focus-visible:border-border/80 focus-visible:ring-foreground/5 w-full rounded-xl border-transparent shadow-none transition-all duration-300 sm:w-32"
+            value={draft.recall_limit}
+            onChange={(event) =>
+              onUpdate({ recall_limit: Number(event.target.value) })
             }
           />
         </SettingRow>

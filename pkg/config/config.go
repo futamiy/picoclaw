@@ -529,6 +529,16 @@ type Mem0MemoryConfig struct {
 	AgentID string `json:"agent_id,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_MEM0_AGENT_ID"`
 	// SyncEveryTurns syncs once every N completed turns (min 1). 0 uses the default.
 	SyncEveryTurns int `json:"sync_every_turns,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_MEM0_SYNC_EVERY_TURNS"`
+	// RecallMode controls how memory is read back: "context" (or "hybrid")
+	// injects relevant memories into the prompt, "off" disables recall. Mem0
+	// exposes no recall tools, so "tools" behaves as "off". Empty uses the
+	// default ("context").
+	RecallMode string `json:"recall_mode,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_MEM0_RECALL_MODE"`
+	// ContextCadence is the minimum number of turns between recall prefetches
+	// (min 1). Higher values reduce API calls. 0 uses the default.
+	ContextCadence int `json:"context_cadence,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_MEM0_CONTEXT_CADENCE"`
+	// RecallLimit caps how many memories are fetched per prefetch. 0 uses the default.
+	RecallLimit int `json:"recall_limit,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_MEM0_RECALL_LIMIT"`
 }
 
 // RetainDBMemoryConfig configures pushing conversation transcripts to a RetainDB
@@ -542,8 +552,20 @@ type RetainDBMemoryConfig struct {
 	APIKey string `json:"api_key,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_RETAINDB_API_KEY"`
 	// Namespace scopes stored data. Empty uses the agent ID.
 	Namespace string `json:"namespace,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_RETAINDB_NAMESPACE"`
+	// UserID scopes stored memories to the human user. Empty uses the default.
+	UserID string `json:"user_id,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_RETAINDB_USER_ID"`
 	// SyncEveryTurns syncs once every N completed turns (min 1). 0 uses the default.
 	SyncEveryTurns int `json:"sync_every_turns,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_RETAINDB_SYNC_EVERY_TURNS"`
+	// RecallMode controls how memory is read back: "context" (or "hybrid")
+	// injects relevant memories into the prompt, "off" disables recall. RetainDB
+	// exposes no recall tools, so "tools" behaves as "off". Empty uses the
+	// default ("context").
+	RecallMode string `json:"recall_mode,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_RETAINDB_RECALL_MODE"`
+	// ContextCadence is the minimum number of turns between recall prefetches
+	// (min 1). Higher values reduce API calls. 0 uses the default.
+	ContextCadence int `json:"context_cadence,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_RETAINDB_CONTEXT_CADENCE"`
+	// RecallLimit caps how many memories are fetched per prefetch. 0 uses the default.
+	RecallLimit int `json:"recall_limit,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_MEMORY_RETAINDB_RECALL_LIMIT"`
 }
 
 // MemoryBackupConfig configures local backups of the memory directory.
@@ -574,17 +596,13 @@ type MemoryBackupConfig struct {
 // FullBackupConfig configures local full-data backups of the whole PicoClaw
 // home directory (config, workspace, memory, sessions, state). It is separate
 // from Agents.Defaults.Memory.Backup, which archives only the workspace memory
-// directory. Automatic backups are OFF by default.
+// directory. Full backups are manual (triggered from the WebUI); they are never
+// scheduled automatically.
 type FullBackupConfig struct {
-	// Enabled turns on the scheduled full-home backup ticker. Manual backups
-	// always work regardless. Off by default.
-	Enabled bool `json:"enabled" env:"PICOCLAW_BACKUP_ENABLED"`
 	// Dir is where archives are written. Empty uses ~/.picoclaw/backups.
 	Dir string `json:"dir,omitempty" env:"PICOCLAW_BACKUP_DIR"`
 	// Keep is how many archives to retain (oldest pruned). 0 uses the default.
 	Keep int `json:"keep,omitempty" env:"PICOCLAW_BACKUP_KEEP"`
-	// IntervalHours is how often to archive when Enabled (min 1). 0 uses the default.
-	IntervalHours int `json:"interval_hours,omitempty" env:"PICOCLAW_BACKUP_INTERVAL_HOURS"`
 	// IncludeSecrets includes secret-bearing files (.security.yml, auth store)
 	// in the archive. Unset defaults to true so a full backup is complete.
 	IncludeSecrets *bool `json:"include_secrets,omitempty" env:"PICOCLAW_BACKUP_INCLUDE_SECRETS"`
@@ -596,14 +614,6 @@ func (b FullBackupConfig) EffectiveKeep() int {
 		return b.Keep
 	}
 	return DefaultBackupKeep
-}
-
-// EffectiveIntervalHours returns the configured archive interval or the default.
-func (b FullBackupConfig) EffectiveIntervalHours() int {
-	if b.IntervalHours > 0 {
-		return b.IntervalHours
-	}
-	return DefaultBackupIntervalHour
 }
 
 // EffectiveIncludeSecrets reports whether secret-bearing files are included.
@@ -630,6 +640,13 @@ const (
 	DefaultHonchoBaseURL            = "https://api.honcho.dev"
 	DefaultHonchoUserPeerID         = "user"
 	DefaultMem0BaseURL              = "https://api.mem0.ai"
+	// DefaultMemoryRecallMode injects recalled memory and exposes the provider's
+	// native tool for external providers without a separate tools toggle.
+	DefaultMemoryRecallMode = HonchoRecallHybrid
+	// DefaultMemoryContextCadence is the min turns between external prefetches.
+	DefaultMemoryContextCadence = 1
+	// DefaultMemoryRecallLimit caps memories fetched per recall prefetch.
+	DefaultMemoryRecallLimit = 10
 	// HonchoTriggerAuto pushes transcripts without asking the user.
 	HonchoTriggerAuto = "auto"
 	// HonchoTriggerAsk stages a pending batch awaiting user approval.
@@ -877,6 +894,102 @@ func (m RetainDBMemoryConfig) EffectiveSyncEveryTurns() int {
 		return m.SyncEveryTurns
 	}
 	return DefaultMemorySyncEveryTurns
+}
+
+// EffectiveUserID returns the configured RetainDB user or the default.
+func (m RetainDBMemoryConfig) EffectiveUserID() string {
+	if s := strings.TrimSpace(m.UserID); s != "" {
+		return s
+	}
+	return DefaultHonchoUserPeerID
+}
+
+// EffectiveRecallMode resolves the Mem0 recall mode.
+func (m Mem0MemoryConfig) EffectiveRecallMode() string {
+	return effectiveExternalRecallMode(m.RecallMode)
+}
+
+// InjectsContext reports whether Mem0 recall injects context into prompts.
+func (m Mem0MemoryConfig) InjectsContext() bool {
+	return externalRecallInjectsContext(m.EffectiveRecallMode())
+}
+
+// ExposesTools reports whether the Mem0 read/write tool is registered.
+func (m Mem0MemoryConfig) ExposesTools() bool {
+	return externalRecallExposesTools(m.EffectiveRecallMode())
+}
+
+// EffectiveContextCadence returns the configured cadence or the default.
+func (m Mem0MemoryConfig) EffectiveContextCadence() int {
+	if m.ContextCadence > 0 {
+		return m.ContextCadence
+	}
+	return DefaultMemoryContextCadence
+}
+
+// EffectiveRecallLimit returns the configured recall limit or the default.
+func (m Mem0MemoryConfig) EffectiveRecallLimit() int {
+	if m.RecallLimit > 0 {
+		return m.RecallLimit
+	}
+	return DefaultMemoryRecallLimit
+}
+
+// EffectiveRecallMode resolves the RetainDB recall mode.
+func (m RetainDBMemoryConfig) EffectiveRecallMode() string {
+	return effectiveExternalRecallMode(m.RecallMode)
+}
+
+// InjectsContext reports whether RetainDB recall injects context into prompts.
+func (m RetainDBMemoryConfig) InjectsContext() bool {
+	return externalRecallInjectsContext(m.EffectiveRecallMode())
+}
+
+// ExposesTools reports whether the RetainDB read/write tool is registered.
+func (m RetainDBMemoryConfig) ExposesTools() bool {
+	return externalRecallExposesTools(m.EffectiveRecallMode())
+}
+
+// EffectiveContextCadence returns the configured cadence or the default.
+func (m RetainDBMemoryConfig) EffectiveContextCadence() int {
+	if m.ContextCadence > 0 {
+		return m.ContextCadence
+	}
+	return DefaultMemoryContextCadence
+}
+
+// EffectiveRecallLimit returns the configured recall limit or the default.
+func (m RetainDBMemoryConfig) EffectiveRecallLimit() int {
+	if m.RecallLimit > 0 {
+		return m.RecallLimit
+	}
+	return DefaultMemoryRecallLimit
+}
+
+// effectiveExternalRecallMode normalizes a recall mode for providers that
+// expose a native read/write tool (Mem0, RetainDB). Unknown values fall back to
+// "off" so a typo never silently enables extra API traffic.
+func effectiveExternalRecallMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case HonchoRecallHybrid, HonchoRecallContext, HonchoRecallTools, HonchoRecallOff:
+		return strings.ToLower(strings.TrimSpace(mode))
+	case "":
+		return DefaultMemoryRecallMode
+	default:
+		return HonchoRecallOff
+	}
+}
+
+// externalRecallInjectsContext reports whether the mode injects recalled
+// memory into the prompt.
+func externalRecallInjectsContext(mode string) bool {
+	return mode == HonchoRecallHybrid || mode == HonchoRecallContext
+}
+
+// externalRecallExposesTools reports whether the mode exposes native memory
+// tools.
+func externalRecallExposesTools(mode string) bool {
+	return mode == HonchoRecallHybrid || mode == HonchoRecallTools
 }
 
 type AgentDefaults struct {

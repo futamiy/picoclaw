@@ -22,7 +22,9 @@ import (
 	"github.com/sipeed/picoclaw/pkg/session"
 	"github.com/sipeed/picoclaw/pkg/tools"
 	honchotool "github.com/sipeed/picoclaw/pkg/tools/honcho"
+	mem0tool "github.com/sipeed/picoclaw/pkg/tools/mem0"
 	memorytool "github.com/sipeed/picoclaw/pkg/tools/memory"
+	retaindbtool "github.com/sipeed/picoclaw/pkg/tools/retaindb"
 )
 
 // AgentInstance represents a fully configured agent with its own workspace,
@@ -423,12 +425,17 @@ func NewAgentInstance(
 			instance.MemorySync = newMemorySyncer(
 				instance,
 				&mem0Sink{
-					client:  mem0.New(memCfg.Mem0.EffectiveBaseURL(), memCfg.Mem0.APIKey),
-					userID:  memCfg.Mem0.UserID,
-					agentID: agentID,
+					client:      mem0.New(memCfg.Mem0.EffectiveBaseURL(), memCfg.Mem0.APIKey),
+					userID:      memCfg.Mem0.UserID,
+					agentID:     agentID,
+					recallLimit: memCfg.Mem0.EffectiveRecallLimit(),
 				},
 				memCfg.Mem0.EffectiveSyncEveryTurns(),
 				cfg.FilterSensitiveData,
+				memoryRecallConfig{
+					Enabled: memCfg.Mem0.InjectsContext(),
+					Cadence: memCfg.Mem0.EffectiveContextCadence(),
+				},
 			)
 		case config.MemoryProviderRetainDB:
 			namespace := memCfg.RetainDB.Namespace
@@ -438,30 +445,63 @@ func NewAgentInstance(
 			instance.MemorySync = newMemorySyncer(
 				instance,
 				&retainDBSink{
-					client: retaindb.New(memCfg.RetainDB.EffectiveBaseURL(), memCfg.RetainDB.APIKey, namespace),
+					client:      retaindb.New(memCfg.RetainDB.EffectiveBaseURL(), memCfg.RetainDB.APIKey, namespace),
+					userID:      memCfg.RetainDB.EffectiveUserID(),
+					recallLimit: memCfg.RetainDB.EffectiveRecallLimit(),
 				},
 				memCfg.RetainDB.EffectiveSyncEveryTurns(),
 				cfg.FilterSensitiveData,
+				memoryRecallConfig{
+					Enabled: memCfg.RetainDB.InjectsContext(),
+					Cadence: memCfg.RetainDB.EffectiveContextCadence(),
+				},
 			)
 		}
 
-		// Expose Honcho read/reasoning tools when the recall mode includes tools.
-		if memCfg.EffectiveMemoryProvider() == config.MemoryProviderHoncho && memCfg.Honcho.ExposesTools() {
-			workspaceID := strings.TrimSpace(memCfg.Honcho.WorkspaceID)
-			if workspaceID == "" {
-				workspaceID = instance.ID
+		// Expose each provider's native read/write tool when the recall mode
+		// includes tools (hybrid or tools).
+		switch memCfg.EffectiveMemoryProvider() {
+		case config.MemoryProviderHoncho:
+			if memCfg.Honcho.ExposesTools() {
+				workspaceID := strings.TrimSpace(memCfg.Honcho.WorkspaceID)
+				if workspaceID == "" {
+					workspaceID = instance.ID
+				}
+				agentPeer := strings.TrimSpace(memCfg.Honcho.AgentPeerID)
+				if agentPeer == "" {
+					agentPeer = instance.ID
+				}
+				toolsRegistry.Register(honchotool.NewTool(honchotool.Config{
+					Client:             honcho.New(memCfg.Honcho.EffectiveBaseURL(), memCfg.Honcho.APIKey),
+					WorkspaceID:        workspaceID,
+					UserPeerID:         memCfg.Honcho.EffectiveUserPeerID(),
+					AgentPeerID:        agentPeer,
+					DefaultDialectical: memCfg.Honcho.EffectiveDialecticLevel(),
+				}))
 			}
-			agentPeer := strings.TrimSpace(memCfg.Honcho.AgentPeerID)
-			if agentPeer == "" {
-				agentPeer = instance.ID
+		case config.MemoryProviderMem0:
+			if memCfg.Mem0.ExposesTools() {
+				agentID := memCfg.Mem0.AgentID
+				if agentID == "" {
+					agentID = instance.ID
+				}
+				toolsRegistry.Register(mem0tool.NewTool(mem0tool.Config{
+					Client:  mem0.New(memCfg.Mem0.EffectiveBaseURL(), memCfg.Mem0.APIKey),
+					UserID:  memCfg.Mem0.UserID,
+					AgentID: agentID,
+				}))
 			}
-			toolsRegistry.Register(honchotool.NewTool(honchotool.Config{
-				Client:             honcho.New(memCfg.Honcho.EffectiveBaseURL(), memCfg.Honcho.APIKey),
-				WorkspaceID:        workspaceID,
-				UserPeerID:         memCfg.Honcho.EffectiveUserPeerID(),
-				AgentPeerID:        agentPeer,
-				DefaultDialectical: memCfg.Honcho.EffectiveDialecticLevel(),
-			}))
+		case config.MemoryProviderRetainDB:
+			if memCfg.RetainDB.ExposesTools() {
+				namespace := strings.TrimSpace(memCfg.RetainDB.Namespace)
+				if namespace == "" {
+					namespace = instance.ID
+				}
+				toolsRegistry.Register(retaindbtool.NewTool(retaindbtool.Config{
+					Client: retaindb.New(memCfg.RetainDB.EffectiveBaseURL(), memCfg.RetainDB.APIKey, namespace),
+					UserID: memCfg.RetainDB.EffectiveUserID(),
+				}))
+			}
 		}
 	}
 

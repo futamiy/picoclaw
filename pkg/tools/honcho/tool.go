@@ -271,8 +271,8 @@ func (t *Tool) publishReasoned(
 		severity = runtimeevents.SeverityError
 	}
 	t.runtimeEvents.PublishNonBlocking(runtimeevents.Event{
-		Kind:     runtimeevents.KindAgentMemoryHonchoReasoned,
-		Source:   runtimeevents.Source{Component: "honcho", Name: t.cfg.WorkspaceID},
+		Kind:   runtimeevents.KindAgentMemoryHonchoReasoned,
+		Source: runtimeevents.Source{Component: "honcho", Name: t.cfg.WorkspaceID},
 		Scope: runtimeevents.Scope{
 			AgentID:    toolshared.ToolAgentID(ctx),
 			SessionKey: toolshared.ToolSessionKey(ctx),

@@ -146,6 +146,64 @@ export function Mem0Settings({
             }
           />
         </SettingRow>
+
+        <SettingRow
+          label={t("pages.agent.tools.memory.mem0.recall", "Recall Memory")}
+          description={t(
+            "pages.agent.tools.memory.mem0.recall_hint",
+            "Inject memories Mem0 already holds into the prompt before each turn.",
+          )}
+        >
+          <Switch
+            checked={draft.recall_mode !== "off"}
+            onCheckedChange={(checked) =>
+              onUpdate({ recall_mode: checked ? "hybrid" : "off" })
+            }
+            className="data-[state=checked]:shadow-xs"
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t(
+            "pages.agent.tools.memory.mem0.context_cadence",
+            "Recall Cadence",
+          )}
+          description={t(
+            "pages.agent.tools.memory.mem0.context_cadence_hint",
+            "Refresh recalled memories once every N completed turns.",
+          )}
+        >
+          <Input
+            type="number"
+            min={1}
+            className="bg-muted/40 hover:bg-muted/60 focus-visible:bg-background focus-visible:border-border/80 focus-visible:ring-foreground/5 w-full rounded-xl border-transparent shadow-none transition-all duration-300 sm:w-32"
+            value={draft.context_cadence}
+            onChange={(event) =>
+              onUpdate({ context_cadence: Number(event.target.value) })
+            }
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t(
+            "pages.agent.tools.memory.mem0.recall_limit",
+            "Recall Limit",
+          )}
+          description={t(
+            "pages.agent.tools.memory.mem0.recall_limit_hint",
+            "Maximum memories fetched per recall.",
+          )}
+        >
+          <Input
+            type="number"
+            min={1}
+            className="bg-muted/40 hover:bg-muted/60 focus-visible:bg-background focus-visible:border-border/80 focus-visible:ring-foreground/5 w-full rounded-xl border-transparent shadow-none transition-all duration-300 sm:w-32"
+            value={draft.recall_limit}
+            onChange={(event) =>
+              onUpdate({ recall_limit: Number(event.target.value) })
+            }
+          />
+        </SettingRow>
       </div>
     </div>
   )

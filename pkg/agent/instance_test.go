@@ -137,6 +137,123 @@ func TestNewAgentInstance_DefaultsTemperatureWhenUnset(t *testing.T) {
 	}
 }
 
+func TestNewAgentInstance_ExternalProvidersGetRecall(t *testing.T) {
+	tests := []struct {
+		name        string
+		memory      config.MemoryConfig
+		wantRecall  bool
+		wantCadence int
+		wantLimit   int
+		wantTool    string
+	}{
+		{
+			name: "mem0 recall default",
+			memory: config.MemoryConfig{
+				Enabled:  true,
+				Provider: config.MemoryProviderMem0,
+				Mem0:     config.Mem0MemoryConfig{Enabled: true, BaseURL: "http://mem0.test", ContextCadence: 3, RecallLimit: 4},
+			},
+			wantRecall:  true,
+			wantCadence: 3,
+			wantLimit:   4,
+			wantTool:    "mem0",
+		},
+		{
+			name: "mem0 recall off",
+			memory: config.MemoryConfig{
+				Enabled:  true,
+				Provider: config.MemoryProviderMem0,
+				Mem0:     config.Mem0MemoryConfig{Enabled: true, BaseURL: "http://mem0.test", RecallMode: "off"},
+			},
+			wantRecall:  false,
+			wantCadence: 1,
+			wantLimit:   10,
+		},
+		{
+			name: "mem0 context only hides the tool",
+			memory: config.MemoryConfig{
+				Enabled:  true,
+				Provider: config.MemoryProviderMem0,
+				Mem0:     config.Mem0MemoryConfig{Enabled: true, BaseURL: "http://mem0.test", RecallMode: "context"},
+			},
+			wantRecall:  true,
+			wantCadence: 1,
+			wantLimit:   10,
+		},
+		{
+			name: "mem0 tools only exposes the tool",
+			memory: config.MemoryConfig{
+				Enabled:  true,
+				Provider: config.MemoryProviderMem0,
+				Mem0:     config.Mem0MemoryConfig{Enabled: true, BaseURL: "http://mem0.test", RecallMode: "tools"},
+			},
+			wantRecall:  false,
+			wantCadence: 1,
+			wantLimit:   10,
+			wantTool:    "mem0",
+		},
+		{
+			name: "retaindb recall default",
+			memory: config.MemoryConfig{
+				Enabled:  true,
+				Provider: config.MemoryProviderRetainDB,
+				RetainDB: config.RetainDBMemoryConfig{Enabled: true, BaseURL: "http://retain.test", UserID: "u1"},
+			},
+			wantRecall:  true,
+			wantCadence: 1,
+			wantLimit:   10,
+			wantTool:    "retaindb",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Agents: config.AgentsConfig{
+					Defaults: config.AgentDefaults{
+						Workspace:         t.TempDir(),
+						ModelName:         "test-model",
+						MaxTokens:         512,
+						MaxToolIterations: 2,
+						Memory:            tc.memory,
+					},
+				},
+			}
+
+			agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg, &mockProvider{})
+			sync, ok := agent.MemorySync.(*MemorySyncer)
+			if !ok {
+				t.Fatalf("MemorySync = %T, want *MemorySyncer", agent.MemorySync)
+			}
+			if sync.recallEnabled != tc.wantRecall || sync.contextCadence != tc.wantCadence {
+				t.Fatalf("recall=%v cadence=%d, want %v/%d", sync.recallEnabled, sync.contextCadence, tc.wantRecall, tc.wantCadence)
+			}
+			if got := sync.MemoryProviderName(); got != tc.memory.Provider {
+				t.Fatalf("provider = %q, want %q", got, tc.memory.Provider)
+			}
+			switch sink := sync.sink.(type) {
+			case *mem0Sink:
+				if sink.recallLimit != tc.wantLimit {
+					t.Fatalf("mem0 recall limit = %d, want %d", sink.recallLimit, tc.wantLimit)
+				}
+			case *retainDBSink:
+				if sink.recallLimit != tc.wantLimit || sink.userID != "u1" {
+					t.Fatalf("retaindb sink = %+v, want limit %d/user u1", sink, tc.wantLimit)
+				}
+			default:
+				t.Fatalf("unexpected sink type %T", sync.sink)
+			}
+			if tc.wantTool == "" {
+				if agent.Tools.HasRegistered("mem0") || agent.Tools.HasRegistered("retaindb") {
+					t.Fatalf("provider tool registered despite recall mode %q", tc.memory.Mem0.RecallMode)
+				}
+			} else if !agent.Tools.HasRegistered(tc.wantTool) {
+				t.Fatalf("provider tool %q not registered", tc.wantTool)
+			}
+		})
+	}
+}
+
 func TestNewAgentInstance_ResolveCandidatesFromModelListAlias(t *testing.T) {
 	tests := []struct {
 		name         string

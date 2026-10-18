@@ -24,23 +24,23 @@ const (
 type PromptSlot string
 
 const (
-	PromptSlotIdentity     PromptSlot = "identity"
-	PromptSlotHierarchy    PromptSlot = "hierarchy"
-	PromptSlotWorkspace    PromptSlot = "workspace"
-	PromptSlotTooling      PromptSlot = "tooling"
-	PromptSlotMCP          PromptSlot = "mcp"
-	PromptSlotSkillCatalog PromptSlot = "skill_catalog"
-	PromptSlotActiveSkill  PromptSlot = "active_skill"
-	PromptSlotMemory       PromptSlot = "memory"
-	PromptSlotHoncho       PromptSlot = "honcho_memory"
-	PromptSlotRuntime      PromptSlot = "runtime"
-	PromptSlotSummary      PromptSlot = "summary"
-	PromptSlotMessage      PromptSlot = "message"
-	PromptSlotSteering     PromptSlot = "steering"
-	PromptSlotSubTurn      PromptSlot = "subturn"
-	PromptSlotToolResult   PromptSlot = "tool_result"
-	PromptSlotInterrupt    PromptSlot = "interrupt"
-	PromptSlotOutput       PromptSlot = "output"
+	PromptSlotIdentity       PromptSlot = "identity"
+	PromptSlotHierarchy      PromptSlot = "hierarchy"
+	PromptSlotWorkspace      PromptSlot = "workspace"
+	PromptSlotTooling        PromptSlot = "tooling"
+	PromptSlotMCP            PromptSlot = "mcp"
+	PromptSlotSkillCatalog   PromptSlot = "skill_catalog"
+	PromptSlotActiveSkill    PromptSlot = "active_skill"
+	PromptSlotMemory         PromptSlot = "memory"
+	PromptSlotExternalMemory PromptSlot = "external_memory"
+	PromptSlotRuntime        PromptSlot = "runtime"
+	PromptSlotSummary        PromptSlot = "summary"
+	PromptSlotMessage        PromptSlot = "message"
+	PromptSlotSteering       PromptSlot = "steering"
+	PromptSlotSubTurn        PromptSlot = "subturn"
+	PromptSlotToolResult     PromptSlot = "tool_result"
+	PromptSlotInterrupt      PromptSlot = "interrupt"
+	PromptSlotOutput         PromptSlot = "output"
 )
 
 type PromptSourceID string
@@ -52,7 +52,7 @@ const (
 	PromptSourceRuntime        PromptSourceID = "runtime.context"
 	PromptSourceSummary        PromptSourceID = "context.summary"
 	PromptSourceMemory         PromptSourceID = "memory:workspace"
-	PromptSourceHoncho         PromptSourceID = "memory:honcho"
+	PromptSourceExternalMemory PromptSourceID = "memory:external"
 	PromptSourceSkillCatalog   PromptSourceID = "skill:index"
 	PromptSourceActiveSkills   PromptSourceID = "skill:active"
 	PromptSourceAgentDiscovery PromptSourceID = "agent:discovery"
@@ -109,9 +109,12 @@ type PromptBuildRequest struct {
 	History []providers.Message
 	Summary string
 
-	// HonchoContext is an optional, per-turn block of memory prefetched from
-	// the Honcho provider. It is injected as dynamic (uncached) context.
-	HonchoContext string
+	// ExternalMemoryContext is an optional, per-turn block of memory recalled
+	// from the configured external provider (Honcho, Mem0, RetainDB).
+	ExternalMemoryContext string
+	// ExternalMemoryProvider labels that block in the prompt ("honcho",
+	// "mem0", "retaindb").
+	ExternalMemoryProvider string
 
 	CurrentMessage string
 	Media          []string
@@ -226,10 +229,10 @@ func builtinPromptSources() []PromptSourceDescriptor {
 			StableByDefault: true,
 		},
 		{
-			ID:              PromptSourceHoncho,
+			ID:              PromptSourceExternalMemory,
 			Owner:           "memory",
-			Description:     "Prefetched Honcho memory context",
-			Allowed:         []PromptPlacement{{Layer: PromptLayerContext, Slot: PromptSlotHoncho}},
+			Description:     "Prefetched external-provider memory context",
+			Allowed:         []PromptPlacement{{Layer: PromptLayerContext, Slot: PromptSlotExternalMemory}},
 			StableByDefault: false,
 		},
 		{
@@ -506,7 +509,7 @@ func slotPriority(slot PromptSlot) int {
 		return 770
 	case PromptSlotMemory:
 		return 700
-	case PromptSlotHoncho:
+	case PromptSlotExternalMemory:
 		return 698
 	case PromptSlotOutput:
 		return 695

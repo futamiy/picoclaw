@@ -319,13 +319,13 @@ func TestE2E_Mem0Sync_PushesTranscript(t *testing.T) {
 	agent.Sessions.AddFullMessage("s1", providers.Message{Role: "assistant", Content: "noted"})
 
 	sink := &mem0Sink{client: mem0.New(srv.URL, "key"), userID: "u1", agentID: "a1"}
-	syncer := newMemorySyncer(agent, sink, 1, nil)
+	syncer := newMemorySyncer(agent, sink, 1, nil, memoryRecallConfig{})
 	syncer.MaybeSync(&AgentLoop{}, "s1")
 
-	if !waitFor(t, 2*time.Second, func() bool { return len(fs.RequestsFor(memtest.ProviderMem0, "/memories/")) > 0 }) {
+	if !waitFor(t, 2*time.Second, func() bool { return len(fs.RequestsFor(memtest.ProviderMem0, "/memories/add/")) > 0 }) {
 		t.Fatal("mem0 never received the transcript")
 	}
-	reqs := fs.RequestsFor(memtest.ProviderMem0, "/memories/")
+	reqs := fs.RequestsFor(memtest.ProviderMem0, "/memories/add/")
 	var body struct {
 		Messages []struct {
 			Role    string `json:"role"`
@@ -354,21 +354,27 @@ func TestE2E_RetainDBSync_PushesTranscript(t *testing.T) {
 	agent.Sessions.AddFullMessage("s1", providers.Message{Role: "user", Content: "hello retaindb"})
 
 	sink := &retainDBSink{client: retaindb.New(srv.URL, "key", "ns-1")}
-	syncer := newMemorySyncer(agent, sink, 1, nil)
+	syncer := newMemorySyncer(agent, sink, 1, nil, memoryRecallConfig{})
 	syncer.MaybeSync(&AgentLoop{}, "s1")
 
 	if !waitFor(t, 2*time.Second, func() bool { return len(fs.Requests()) > 0 }) {
 		t.Fatal("retaindb never received the transcript")
 	}
-	reqs := fs.Requests()
+	reqs := fs.RequestsFor(memtest.ProviderRetainDB, "/memory/ingest/session")
+	if len(reqs) == 0 {
+		t.Fatalf("retaindb never received an ingest request: %+v", fs.Requests())
+	}
 	var body struct {
-		Namespace string `json:"namespace"`
+		Project   string `json:"project"`
+		UserID    string `json:"user_id"`
+		SessionID string `json:"session_id"`
+		WriteMode string `json:"write_mode"`
 		Messages  []any  `json:"messages"`
 	}
 	if err := json.Unmarshal(reqs[0].Body, &body); err != nil {
 		t.Fatalf("decode retaindb body: %v", err)
 	}
-	if body.Namespace != "ns-1" || len(body.Messages) != 1 {
+	if body.Project != "ns-1" || body.SessionID != "s1" || len(body.Messages) != 1 {
 		t.Fatalf("retaindb body wrong: %+v", body)
 	}
 }
@@ -383,7 +389,7 @@ func TestE2E_MemorySync_SanitizeApplied(t *testing.T) {
 
 	sink := &mem0Sink{client: mem0.New(srv.URL, ""), userID: "u", agentID: "a"}
 	sanitize := func(s string) string { return strings.ReplaceAll(s, "SECRET9", "REDACTED") }
-	syncer := newMemorySyncer(agent, sink, 1, sanitize)
+	syncer := newMemorySyncer(agent, sink, 1, sanitize, memoryRecallConfig{})
 	syncer.MaybeSync(&AgentLoop{}, "s1")
 
 	if !waitFor(t, 2*time.Second, func() bool { return len(fs.Requests()) > 0 }) {
@@ -407,7 +413,7 @@ func TestE2E_MemorySync_FailureIsSwallowed(t *testing.T) {
 	agent.Sessions.AddFullMessage("s1", providers.Message{Role: "user", Content: "trigger"})
 
 	sink := &mem0Sink{client: mem0.New(srv.URL, ""), userID: "u", agentID: "a"}
-	syncer := newMemorySyncer(agent, sink, 1, nil)
+	syncer := newMemorySyncer(agent, sink, 1, nil, memoryRecallConfig{})
 	// Must not panic or block on provider failure.
 	syncer.MaybeSync(&AgentLoop{}, "s1")
 	waitFor(t, 500*time.Millisecond, func() bool { return false })
@@ -475,16 +481,126 @@ func TestE2E_HonchoRecall_PrefetchesIntoContext(t *testing.T) {
 	}, nil)
 
 	// First call schedules the background prefetch and returns "".
-	if got := hs.RecallContext("s1"); got != "" {
+	if got := hs.RecallContext("s1", ""); got != "" {
 		t.Fatalf("first recall should be empty, got %q", got)
 	}
 	// The background fetch populates the cache.
-	if !waitFor(t, 3*time.Second, func() bool { return hs.RecallContext("s1") != "" }) {
+	if !waitFor(t, 3*time.Second, func() bool { return hs.RecallContext("s1", "") != "" }) {
 		t.Fatal("honcho recall never populated the cache")
 	}
-	block := hs.RecallContext("s1")
+	block := hs.RecallContext("s1", "")
 	if !strings.Contains(block, "knows Go and tea") {
 		t.Fatalf("recall block missing representation: %q", block)
+	}
+}
+
+func TestE2E_Mem0Recall_PrefetchesIntoContext(t *testing.T) {
+	fs := memtest.NewServer()
+	fs.SetMem0Memories("prefers tea", "builds Go services")
+	srv := httptest.NewServer(fs)
+	defer srv.Close()
+
+	agent, _ := newTestAgent(t, "agent-x", nil)
+	agent.Sessions.AddFullMessage("s1", providers.Message{Role: "user", Content: "what should I drink?"})
+
+	sink := &mem0Sink{
+		client:      mem0.New(srv.URL, "key"),
+		userID:      "u1",
+		agentID:     "a1",
+		recallLimit: 5,
+	}
+	syncer := newMemorySyncer(agent, sink, 1, nil, memoryRecallConfig{Enabled: true, Cadence: 1})
+
+	// First call schedules the background prefetch and returns "".
+	if got := syncer.RecallContext("s1", "what should I drink?"); got != "" {
+		t.Fatalf("first recall should be empty, got %q", got)
+	}
+	if !waitFor(t, 3*time.Second, func() bool { return syncer.RecallContext("s1", "what should I drink?") != "" }) {
+		t.Fatal("mem0 recall never populated the cache")
+	}
+	block := syncer.RecallContext("s1", "what should I drink?")
+	for _, want := range []string{"prefers tea", "builds Go services"} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("recall block missing %q: %q", want, block)
+		}
+	}
+	if got := fs.RequestsFor(memtest.ProviderMem0, "/search/"); len(got) == 0 {
+		t.Fatal("mem0 search endpoint was never called")
+	}
+}
+
+func TestE2E_RetainDBRecall_PrefetchesProfileAndSearch(t *testing.T) {
+	fs := memtest.NewServer()
+	fs.SetRetainDBMemories("prefers concise answers")
+	srv := httptest.NewServer(fs)
+	defer srv.Close()
+
+	agent, _ := newTestAgent(t, "agent-x", nil)
+	agent.Sessions.AddFullMessage("s1", providers.Message{Role: "user", Content: "how should I reply?"})
+
+	sink := &retainDBSink{
+		client:      retaindb.New(srv.URL, "key", "ns-1"),
+		userID:      "u1",
+		recallLimit: 5,
+	}
+	syncer := newMemorySyncer(agent, sink, 1, nil, memoryRecallConfig{Enabled: true, Cadence: 1})
+
+	if got := syncer.RecallContext("s1", "how should I reply?"); got != "" {
+		t.Fatalf("first recall should be empty, got %q", got)
+	}
+	if !waitFor(t, 3*time.Second, func() bool { return syncer.RecallContext("s1", "how should I reply?") != "" }) {
+		t.Fatal("retaindb recall never populated the cache")
+	}
+	block := syncer.RecallContext("s1", "how should I reply?")
+	if !strings.Contains(block, "prefers concise answers") {
+		t.Fatalf("recall block missing profile memory: %q", block)
+	}
+	if strings.Count(block, "prefers concise answers") != 1 {
+		t.Fatalf("duplicate memories were not deduped: %q", block)
+	}
+	if got := fs.RequestsFor(memtest.ProviderRetainDB, "/memory/search"); len(got) == 0 {
+		t.Fatal("retaindb search endpoint was never called")
+	}
+	if got := fs.RequestsFor(memtest.ProviderRetainDB, "/profile/u1"); len(got) == 0 {
+		t.Fatal("retaindb profile endpoint was never called")
+	}
+}
+
+// TestE2E_Mem0Recall_ReachesSystemPrompt drives the same path production uses:
+// a MemorySyncer recall block must surface in the assembled prompt under the
+// generic external-memory block, labelled with the provider.
+func TestE2E_Mem0Recall_ReachesSystemPrompt(t *testing.T) {
+	fs := memtest.NewServer()
+	fs.SetMem0Memories("prefers tea")
+	srv := httptest.NewServer(fs)
+	defer srv.Close()
+
+	agent, dir := newTestAgent(t, "agent-x", nil)
+	agent.Sessions.AddFullMessage("s1", providers.Message{Role: "user", Content: "hello"})
+
+	sink := &mem0Sink{client: mem0.New(srv.URL, ""), userID: "u", agentID: "a", recallLimit: 5}
+	syncer := newMemorySyncer(agent, sink, 1, nil, memoryRecallConfig{Enabled: true, Cadence: 1})
+	agent.MemorySync = syncer
+
+	if !waitFor(t, 3*time.Second, func() bool { return syncer.RecallContext("s1", "what should I drink?") != "" }) {
+		t.Fatal("mem0 recall never populated the cache")
+	}
+
+	cb := NewContextBuilder(dir)
+	req := promptBuildRequestForProcessOptions(agent, processOptions{SessionKey: "s1"}, nil, "", "what should I drink?", nil)
+	if req.ExternalMemoryProvider != "mem0" {
+		t.Fatalf("prompt request provider = %q, want mem0", req.ExternalMemoryProvider)
+	}
+	if !strings.Contains(req.ExternalMemoryContext, "prefers tea") {
+		t.Fatalf("prompt request missing recall block: %q", req.ExternalMemoryContext)
+	}
+	var joined strings.Builder
+	for _, m := range cb.BuildMessagesFromPrompt(req) {
+		joined.WriteString(m.Content)
+		joined.WriteString("\n")
+	}
+	if !strings.Contains(joined.String(), "EXTERNAL_MEMORY") || !strings.Contains(joined.String(), "prefers tea") {
+		t.Fatalf("system prompt missing external memory block")
 	}
 }
 

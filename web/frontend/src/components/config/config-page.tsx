@@ -382,11 +382,6 @@ export function ConfigPage() {
         const backupKeep = parseIntField(form.backupKeep, "Backup keep", {
           min: 1,
         })
-        const backupIntervalHours = parseIntField(
-          form.backupIntervalHours,
-          "Backup interval",
-          { min: 1 },
-        )
         const mcpDiscoveryValidationEnabled =
           form.mcpEnabled && form.mcpDiscoveryEnabled
         const mcpDiscoveryPatch: Record<string, unknown> = {
@@ -645,10 +640,8 @@ export function ConfigPage() {
             monitor_usb: form.monitorUSB,
           },
           backup: {
-            enabled: form.backupEnabled,
             dir: form.backupDir.trim(),
             keep: backupKeep,
-            interval_hours: backupIntervalHours,
             include_secrets: form.backupIncludeSecrets,
           },
         })

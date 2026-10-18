@@ -964,21 +964,25 @@ func (cb *ContextBuilder) BuildMessagesFromPrompt(req PromptBuildRequest) []prov
 			contentBlocks = append(contentBlocks, promptContentBlock(summaryPart, nil))
 		}
 
-		if hc := strings.TrimSpace(req.HonchoContext); hc != "" {
-			honchoPart := PromptPart{
-				ID:     "context.honcho",
+		if mc := strings.TrimSpace(req.ExternalMemoryContext); mc != "" {
+			provider := strings.TrimSpace(req.ExternalMemoryProvider)
+			if provider == "" {
+				provider = "external"
+			}
+			memoryPart := PromptPart{
+				ID:     "context.external_memory",
 				Layer:  PromptLayerContext,
-				Slot:   PromptSlotHoncho,
-				Source: PromptSource{ID: PromptSourceHoncho, Name: "context.honcho"},
-				Title:  "honcho memory",
-				Content: "HONCHO_MEMORY: The following background memory was recalled from the " +
-					"Honcho memory service for this session. It may be incomplete or outdated — " +
-					"always defer to explicit instructions and the current conversation.\n\n" + hc,
+				Slot:   PromptSlotExternalMemory,
+				Source: PromptSource{ID: PromptSourceExternalMemory, Name: "context.external_memory"},
+				Title:  provider + " memory",
+				Content: fmt.Sprintf("EXTERNAL_MEMORY: The following background memory was recalled from the %s "+
+					"memory service for this session. It may be incomplete or outdated — "+
+					"always defer to explicit instructions and the current conversation.\n\n%s", provider, mc),
 				Stable: false,
 				Cache:  PromptCacheNone,
 			}
-			stringParts = append(stringParts, honchoPart.Content)
-			contentBlocks = append(contentBlocks, promptContentBlock(honchoPart, nil))
+			stringParts = append(stringParts, memoryPart.Content)
+			contentBlocks = append(contentBlocks, promptContentBlock(memoryPart, nil))
 		}
 	}
 

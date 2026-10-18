@@ -250,13 +250,14 @@ func runChatVariant(
 	cb := agent.NewContextBuilder(workspace)
 	currentMessage := "Given the conversation so far, answer the following questions concisely."
 	promptReq := agent.PromptBuildRequest{
-		History:        history,
-		Summary:        summary,
-		HonchoContext:  honchoContext,
-		CurrentMessage: currentMessage,
-		Channel:        "bench",
-		ChatID:         sample.SampleID,
-		SenderID:       "bench",
+		History:                history,
+		Summary:                summary,
+		ExternalMemoryContext:  honchoContext,
+		ExternalMemoryProvider: "honcho",
+		CurrentMessage:         currentMessage,
+		Channel:                "bench",
+		ChatID:                 sample.SampleID,
+		SenderID:               "bench",
 	}
 	prompt := cb.BuildMessagesFromPrompt(promptReq)
 	contextText := StringListToContent(promptContents(prompt))

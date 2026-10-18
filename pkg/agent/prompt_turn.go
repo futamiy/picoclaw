@@ -8,16 +8,17 @@ import (
 	"github.com/sipeed/picoclaw/pkg/providers"
 )
 
-// recallHonchoContext returns the prefetched Honcho memory block for a session
-// when the agent's memory syncer supports recall. It returns "" otherwise.
-func recallHonchoContext(agent *AgentInstance, sessionKey string) string {
+// recallExternalMemoryContext returns the prefetched memory block and provider
+// label for a session when the agent's memory syncer supports recall. It
+// returns empty strings otherwise.
+func recallExternalMemoryContext(agent *AgentInstance, sessionKey, query string) (string, string) {
 	if agent == nil || agent.MemorySync == nil || sessionKey == "" {
-		return ""
+		return "", ""
 	}
 	if r, ok := agent.MemorySync.(memoryRecaller); ok {
-		return r.RecallContext(sessionKey)
+		return r.RecallContext(sessionKey, query), r.MemoryProviderName()
 	}
-	return ""
+	return "", ""
 }
 
 func promptBuildRequestForTurn(
@@ -40,7 +41,11 @@ func promptBuildRequestForTurn(
 		ActiveSkills:      activeSkillNames(ts.agent, ts.opts),
 		Overlays:          promptOverlaysForOptions(ts.opts),
 	}
-	req.HonchoContext = recallHonchoContext(ts.agent, ts.opts.Dispatch.SessionKey)
+	req.ExternalMemoryContext, req.ExternalMemoryProvider = recallExternalMemoryContext(
+		ts.agent,
+		ts.opts.Dispatch.SessionKey,
+		currentMessage,
+	)
 	hasCallableTools := true
 	if ts.profile.Enabled {
 		hasCallableTools = turnProfileHasCallableTools(ts.profile, ts.agent.Tools.ToProviderDefs()) ||
@@ -104,7 +109,11 @@ func promptBuildRequestForProcessOptions(
 		ActiveSkills:      activeSkillNames(agent, opts),
 		Overlays:          promptOverlaysForOptions(opts),
 	}
-	req.HonchoContext = recallHonchoContext(agent, opts.SessionKey)
+	req.ExternalMemoryContext, req.ExternalMemoryProvider = recallExternalMemoryContext(
+		agent,
+		opts.SessionKey,
+		currentMessage,
+	)
 	profile := opts.TurnProfile
 	hasCallableTools := true
 	if profile.Enabled && agent != nil {

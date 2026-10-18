@@ -72,7 +72,7 @@ func TestMemoryE2EIntegration_Mem0CrossContainer(t *testing.T) {
 	agent.Sessions.AddFullMessage("s1", providers.Message{Role: "assistant", Content: "ack"})
 
 	sink := &mem0Sink{client: mem0.New(mem0URL, "key"), userID: "iu", agentID: "ia"}
-	syncer := newMemorySyncer(agent, sink, 1, nil)
+	syncer := newMemorySyncer(agent, sink, 1, nil, memoryRecallConfig{})
 	syncer.MaybeSync(&AgentLoop{}, "s1")
 
 	got := waitForRecorded(t, mem0URL, 1)
@@ -88,7 +88,7 @@ func TestMemoryE2EIntegration_RetainDBCrossContainer(t *testing.T) {
 	agent.Sessions.AddFullMessage("s1", providers.Message{Role: "user", Content: "cross-container retaindb"})
 
 	sink := &retainDBSink{client: retaindb.New(retaindbURL, "key", "ns")}
-	syncer := newMemorySyncer(agent, sink, 1, nil)
+	syncer := newMemorySyncer(agent, sink, 1, nil, memoryRecallConfig{})
 	syncer.MaybeSync(&AgentLoop{}, "s1")
 
 	got := waitForRecorded(t, retaindbURL, 1)

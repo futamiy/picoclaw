@@ -66,6 +66,9 @@ type mem0ConfigResponse struct {
 	UserID         string `json:"user_id,omitempty"`
 	AgentID        string `json:"agent_id,omitempty"`
 	SyncEveryTurns int    `json:"sync_every_turns"`
+	RecallMode     string `json:"recall_mode"`
+	ContextCadence int    `json:"context_cadence"`
+	RecallLimit    int    `json:"recall_limit"`
 }
 
 type retaindbConfigResponse struct {
@@ -73,7 +76,11 @@ type retaindbConfigResponse struct {
 	BaseURL        string `json:"base_url,omitempty"`
 	APIKeySet      bool   `json:"api_key_set"`
 	Namespace      string `json:"namespace,omitempty"`
+	UserID         string `json:"user_id,omitempty"`
 	SyncEveryTurns int    `json:"sync_every_turns"`
+	RecallMode     string `json:"recall_mode"`
+	ContextCadence int    `json:"context_cadence"`
+	RecallLimit    int    `json:"recall_limit"`
 }
 
 type memoryConfigRequest struct {
@@ -119,6 +126,9 @@ type mem0ConfigRequest struct {
 	UserID         string `json:"user_id"`
 	AgentID        string `json:"agent_id"`
 	SyncEveryTurns int    `json:"sync_every_turns"`
+	RecallMode     string `json:"recall_mode"`
+	ContextCadence int    `json:"context_cadence"`
+	RecallLimit    int    `json:"recall_limit"`
 }
 
 type retaindbConfigRequest struct {
@@ -127,7 +137,11 @@ type retaindbConfigRequest struct {
 	APIKey         string `json:"api_key"`
 	ClearAPIKey    bool   `json:"clear_api_key"`
 	Namespace      string `json:"namespace"`
+	UserID         string `json:"user_id"`
 	SyncEveryTurns int    `json:"sync_every_turns"`
+	RecallMode     string `json:"recall_mode"`
+	ContextCadence int    `json:"context_cadence"`
+	RecallLimit    int    `json:"recall_limit"`
 }
 
 type honchoPendingSummary struct {
@@ -249,6 +263,9 @@ func (h *Handler) handleUpdateMemoryConfig(w http.ResponseWriter, r *http.Reques
 	if req.Mem0.SyncEveryTurns > 0 {
 		cfg.Agents.Defaults.Memory.Mem0.SyncEveryTurns = req.Mem0.SyncEveryTurns
 	}
+	cfg.Agents.Defaults.Memory.Mem0.RecallMode = normalizeHonchoRecallMode(req.Mem0.RecallMode)
+	cfg.Agents.Defaults.Memory.Mem0.ContextCadence = req.Mem0.ContextCadence
+	cfg.Agents.Defaults.Memory.Mem0.RecallLimit = req.Mem0.RecallLimit
 	if req.Mem0.ClearAPIKey {
 		cfg.Agents.Defaults.Memory.Mem0.APIKey = ""
 	} else if key := strings.TrimSpace(req.Mem0.APIKey); key != "" {
@@ -258,9 +275,13 @@ func (h *Handler) handleUpdateMemoryConfig(w http.ResponseWriter, r *http.Reques
 	cfg.Agents.Defaults.Memory.RetainDB.Enabled = req.RetainDB.Enabled
 	cfg.Agents.Defaults.Memory.RetainDB.BaseURL = strings.TrimSpace(req.RetainDB.BaseURL)
 	cfg.Agents.Defaults.Memory.RetainDB.Namespace = strings.TrimSpace(req.RetainDB.Namespace)
+	cfg.Agents.Defaults.Memory.RetainDB.UserID = strings.TrimSpace(req.RetainDB.UserID)
 	if req.RetainDB.SyncEveryTurns > 0 {
 		cfg.Agents.Defaults.Memory.RetainDB.SyncEveryTurns = req.RetainDB.SyncEveryTurns
 	}
+	cfg.Agents.Defaults.Memory.RetainDB.RecallMode = normalizeHonchoRecallMode(req.RetainDB.RecallMode)
+	cfg.Agents.Defaults.Memory.RetainDB.ContextCadence = req.RetainDB.ContextCadence
+	cfg.Agents.Defaults.Memory.RetainDB.RecallLimit = req.RetainDB.RecallLimit
 	if req.RetainDB.ClearAPIKey {
 		cfg.Agents.Defaults.Memory.RetainDB.APIKey = ""
 	} else if key := strings.TrimSpace(req.RetainDB.APIKey); key != "" {
@@ -522,13 +543,20 @@ func buildMemoryConfigResponse(cfg *config.Config) memoryConfigResponse {
 			UserID:         m.Mem0.UserID,
 			AgentID:        m.Mem0.AgentID,
 			SyncEveryTurns: m.Mem0.EffectiveSyncEveryTurns(),
+			RecallMode:     m.Mem0.EffectiveRecallMode(),
+			ContextCadence: m.Mem0.EffectiveContextCadence(),
+			RecallLimit:    m.Mem0.EffectiveRecallLimit(),
 		},
 		RetainDB: retaindbConfigResponse{
 			Enabled:        m.RetainDB.Enabled,
 			BaseURL:        m.RetainDB.BaseURL,
 			APIKeySet:      strings.TrimSpace(m.RetainDB.APIKey) != "",
 			Namespace:      m.RetainDB.Namespace,
+			UserID:         m.RetainDB.UserID,
 			SyncEveryTurns: m.RetainDB.EffectiveSyncEveryTurns(),
+			RecallMode:     m.RetainDB.EffectiveRecallMode(),
+			ContextCadence: m.RetainDB.EffectiveContextCadence(),
+			RecallLimit:    m.RetainDB.EffectiveRecallLimit(),
 		},
 	}
 }

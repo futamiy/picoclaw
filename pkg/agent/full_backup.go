@@ -7,15 +7,12 @@ package agent
 
 import (
 	"archive/zip"
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/sipeed/picoclaw/pkg/logger"
 )
 
 const fullBackupPrefix = "picoclaw-full-"
@@ -147,68 +144,4 @@ func pruneFullBackups(outDir string, keep int) {
 // otherwise: <home>/.picoclaw/backups (shared with memory archives).
 func DefaultFullBackupDir() string {
 	return DefaultMemoryArchiveDir()
-}
-
-// FullBackupService periodically archives the whole PicoClaw home directory to
-// the configured backup directory. It is a no-op when disabled.
-type FullBackupService struct {
-	homeDir        string
-	dir            string
-	keep           int
-	interval       time.Duration
-	includeSecrets bool
-	enabled        bool
-	cancel         context.CancelFunc
-}
-
-// NewFullBackupService creates the scheduled full-backup service. A non-positive
-// interval falls back to 24h.
-func NewFullBackupService(homeDir, dir string, enabled bool, interval time.Duration, keep int, includeSecrets bool) *FullBackupService {
-	if interval <= 0 {
-		interval = 24 * time.Hour
-	}
-	return &FullBackupService{
-		homeDir:        homeDir,
-		dir:            dir,
-		keep:           keep,
-		interval:       interval,
-		includeSecrets: includeSecrets,
-		enabled:        enabled,
-	}
-}
-
-// Start launches the ticker goroutine. It does nothing when disabled.
-func (s *FullBackupService) Start() error {
-	if s == nil || !s.enabled {
-		return nil
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	s.cancel = cancel
-	go s.loop(ctx)
-	return nil
-}
-
-// Stop halts the ticker.
-func (s *FullBackupService) Stop() {
-	if s != nil && s.cancel != nil {
-		s.cancel()
-	}
-}
-
-func (s *FullBackupService) loop(ctx context.Context) {
-	ticker := time.NewTicker(s.interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			path, err := CreateFullBackup(s.homeDir, s.dir, s.keep, s.includeSecrets)
-			if err != nil {
-				logger.WarnCF("agent", "scheduled full backup failed", map[string]any{"error": err.Error()})
-				continue
-			}
-			logger.InfoCF("agent", "scheduled full backup written", map[string]any{"path": path})
-		}
-	}
 }

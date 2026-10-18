@@ -10,6 +10,7 @@ package memtest
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -60,6 +61,12 @@ type Server struct {
 	peerContextJSON map[string]string
 	// ChatContentJSON is returned for Honcho chat/dialectic calls.
 	chatContentJSON string
+	// mem0Memories is returned by Mem0 list/search read endpoints.
+	mem0Memories []string
+	// retainDBMemories is returned by RetainDB search; retainDBProfile by the
+	// profile read endpoint.
+	retainDBMemories []string
+	retainDBProfile  []string
 }
 
 // NewServer returns an empty recording server.
@@ -105,6 +112,22 @@ func (s *Server) SetChatContent(content string) {
 	s.mu.Unlock()
 }
 
+// SetMem0Memories registers the memories returned by Mem0 read endpoints.
+func (s *Server) SetMem0Memories(items ...string) {
+	s.mu.Lock()
+	s.mem0Memories = append([]string(nil), items...)
+	s.mu.Unlock()
+}
+
+// SetRetainDBMemories registers the memories returned by RetainDB search and
+// profile read endpoints.
+func (s *Server) SetRetainDBMemories(items ...string) {
+	s.mu.Lock()
+	s.retainDBMemories = append([]string(nil), items...)
+	s.retainDBProfile = append([]string(nil), items...)
+	s.mu.Unlock()
+}
+
 // Requests returns a snapshot of everything recorded so far.
 func (s *Server) Requests() []RecordedRequest {
 	s.mu.Lock()
@@ -122,6 +145,9 @@ func (s *Server) Reset() {
 	s.sessionContextJSON = make(map[string]string)
 	s.peerContextJSON = make(map[string]string)
 	s.chatContentJSON = ""
+	s.mem0Memories = nil
+	s.retainDBMemories = nil
+	s.retainDBProfile = nil
 	s.failNext = 0
 	s.pingStatus = 0
 }
@@ -256,19 +282,72 @@ func (s *Server) serveHonchoContext(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveMem0(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/memories/") {
+	path := r.URL.Path
+	switch {
+	case r.Method == http.MethodPost && strings.HasSuffix(path, "/search/"):
+		s.mu.Lock()
+		items := append([]string(nil), s.mem0Memories...)
+		s.mu.Unlock()
+		writeJSON(w, map[string]any{"results": memoryObjects(items)})
+	case r.Method == http.MethodGet && strings.HasSuffix(path, "/memories/"):
+		s.mu.Lock()
+		items := append([]string(nil), s.mem0Memories...)
+		s.mu.Unlock()
+		writeJSON(w, map[string]any{"count": len(items), "results": memoryObjects(items)})
+	case r.Method == http.MethodPost && strings.HasSuffix(path, "/memories/add/"):
+		// AddMessages ingestion on the V3 additive pipeline.
+		writeJSON(w, map[string]any{"event_id": "evt-1", "status": "PENDING"})
+	case r.Method == http.MethodPost && strings.HasSuffix(path, "/memories/"):
+		// AddMessages ingestion on the legacy /v1/memories/ route.
 		writeJSON(w, map[string]any{"results": []any{}})
-		return
+	default:
+		http.NotFound(w, r)
 	}
-	http.NotFound(w, r)
 }
 
 func (s *Server) serveRetainDB(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/memories/") {
+	path := r.URL.Path
+	switch {
+	case r.Method == http.MethodPost && strings.HasSuffix(path, "/memory/ingest/session"):
+		writeJSON(w, map[string]any{"success": true, "mode": "sync"})
+	case r.Method == http.MethodPost && strings.HasSuffix(path, "/v1/memory"):
+		writeJSON(w, map[string]any{"success": true})
+	case r.Method == http.MethodPost && strings.HasSuffix(path, "/memory/search"):
+		s.mu.Lock()
+		items := append([]string(nil), s.retainDBMemories...)
+		s.mu.Unlock()
+		results := make([]map[string]any, 0, len(items))
+		for _, item := range items {
+			results = append(results, map[string]any{
+				"memory": map[string]any{"id": "m1", "content": item, "memory_type": "factual"},
+				"score":  0.9,
+			})
+		}
+		writeJSON(w, map[string]any{"results": results, "count": len(results)})
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/v1/memory/profile/"):
+		s.mu.Lock()
+		items := append([]string(nil), s.retainDBProfile...)
+		s.mu.Unlock()
+		writeJSON(w, map[string]any{"memories": memoryObjects(items)})
+	case r.Method == http.MethodPost && strings.HasSuffix(path, "/memories/"):
 		writeJSON(w, map[string]any{"ok": true})
-		return
+	default:
+		http.NotFound(w, r)
 	}
-	http.NotFound(w, r)
+}
+
+// memoryObjects renders plain strings as the memory objects both providers
+// return.
+func memoryObjects(items []string) []map[string]any {
+	out := make([]map[string]any, 0, len(items))
+	for i, item := range items {
+		out = append(out, map[string]any{
+			"id":      fmt.Sprintf("mem-%d", i+1),
+			"memory":  item,
+			"content": item,
+		})
+	}
+	return out
 }
 
 // inferProvider classifies a request path into a provider. Mem0 and RetainDB
@@ -278,9 +357,13 @@ func inferProvider(path string) Provider {
 	switch {
 	case strings.HasPrefix(path, "/v3/workspaces"):
 		return ProviderHoncho
+	case strings.HasPrefix(path, "/v1/memory"), strings.HasPrefix(path, "/v1/context"):
+		return ProviderRetainDB
+	case strings.HasPrefix(path, "/v3/memories"), strings.HasPrefix(path, "/v2/memories"):
+		return ProviderMem0
 	case strings.Contains(path, "/v1/memories"):
-		// Ambiguous between mem0/retaindb; default to mem0. Tests that need
-		// RetainDB attribution use a dedicated server instance.
+		// Ambiguous between mem0/retaindb add routes; default to mem0. Tests
+		// that need RetainDB attribution use a dedicated server instance.
 		return ProviderMem0
 	default:
 		return ProviderMem0

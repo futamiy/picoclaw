@@ -213,6 +213,8 @@ func (h *Handler) registerToolRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/tools/memory/backups", h.handleListMemoryBackups)
 	mux.HandleFunc("POST /api/tools/memory/backups", h.handleCreateMemoryBackup)
 	mux.HandleFunc("POST /api/tools/memory/backups/restore", h.handleRestoreMemoryBackup)
+	mux.HandleFunc("GET /api/backup/full", h.handleListFullBackups)
+	mux.HandleFunc("POST /api/backup/full", h.handleCreateFullBackup)
 }
 
 func (h *Handler) handleListTools(w http.ResponseWriter, r *http.Request) {

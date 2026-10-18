@@ -21,6 +21,8 @@ const (
 	honchoPrefetchTimeout = 8 * time.Second
 	// maxHonchoContextRunes bounds the injected memory block.
 	maxHonchoContextRunes = 4000
+	// maxHonchoDialecticRunes bounds the dialectic (LLM reasoning) supplement.
+	maxHonchoDialecticRunes = 600
 	// maxHonchoCacheKeys bounds the per-session prefetch cache.
 	maxHonchoCacheKeys = 64
 )
@@ -53,18 +55,20 @@ type HonchoSyncer struct {
 	syncing sync.Map       // "agentID:sessionKey" -> bool, dedup in-flight
 
 	prefetchMu sync.Mutex
-	prefetch   map[string]*honchoPrefetchEntry
+	prefetch   map[string]*memoryPrefetchEntry
 	// loop is captured lazily from MaybeSync so background prefetches can emit
 	// events. Guarded by prefetchMu.
 	loop *AgentLoop
 }
 
-// honchoPrefetchEntry is the per-session cached recall block. It is guarded by
-// HonchoSyncer.prefetchMu.
-type honchoPrefetchEntry struct {
-	content  string
-	lastTurn int
-	inFlight bool
+// memoryPrefetchEntry is the per-session cached recall block shared by the
+// Honcho and generic external syncers. It is guarded by the syncer's
+// prefetchMu.
+type memoryPrefetchEntry struct {
+	content       string
+	lastTurn      int
+	lastDialectic int
+	inFlight      bool
 }
 
 func newHonchoSyncer(agent *AgentInstance, client *honcho.Client, hcfg honchoConfig, sanitize func(string) string) *HonchoSyncer {
@@ -103,7 +107,7 @@ func newHonchoSyncer(agent *AgentInstance, client *honcho.Client, hcfg honchoCon
 		dialecticLevel:   hcfg.DialecticLevel,
 		contextTokens:    hcfg.ContextTokens,
 		counts:           make(map[string]int),
-		prefetch:         make(map[string]*honchoPrefetchEntry),
+		prefetch:         make(map[string]*memoryPrefetchEntry),
 	}
 }
 
@@ -120,14 +124,18 @@ type honchoConfig struct {
 	ContextTokens    int
 }
 
+// MemoryProviderName identifies the backend for the injected prompt block.
+func (hs *HonchoSyncer) MemoryProviderName() string { return "honcho" }
+
 // RecallContext returns the cached Honcho memory block for sessionKey, kicking
 // off a background refresh when the cadence is met. It never blocks on the
-// network: a miss returns "" until a background fetch completes.
-func (hs *HonchoSyncer) RecallContext(sessionKey string) string {
+// network: a miss returns "" until a background fetch completes. The base
+// context read is not query-ranked, but the dialectic supplement uses query.
+func (hs *HonchoSyncer) RecallContext(sessionKey, query string) string {
 	if hs == nil || !hs.recallEnabled || sessionKey == "" {
 		return ""
 	}
-	hs.maybePrefetch(sessionKey)
+	hs.maybePrefetch(sessionKey, query)
 
 	hs.prefetchMu.Lock()
 	defer hs.prefetchMu.Unlock()
@@ -138,8 +146,9 @@ func (hs *HonchoSyncer) RecallContext(sessionKey string) string {
 }
 
 // maybePrefetch schedules a background context fetch for sessionKey if the
-// cadence has elapsed and no fetch is already in flight.
-func (hs *HonchoSyncer) maybePrefetch(sessionKey string) {
+// cadence has elapsed and no fetch is already in flight. When the dialectic
+// cadence is also met, the fetch adds Honcho's LLM reasoning supplement.
+func (hs *HonchoSyncer) maybePrefetch(sessionKey, query string) {
 	if hs.client == nil {
 		return
 	}
@@ -148,10 +157,16 @@ func (hs *HonchoSyncer) maybePrefetch(sessionKey string) {
 		historyLen = len(hs.agent.Sessions.GetHistory(sessionKey))
 	}
 
+	// Dialectic calls hit Honcho's LLM, so they run on their own cadence and
+	// only when there is a query to reason about.
+	wantDialectic := hs.dialecticCadence > 0 &&
+		strings.TrimSpace(hs.dialecticLevel) != "" &&
+		strings.TrimSpace(query) != ""
+
 	hs.prefetchMu.Lock()
 	e := hs.prefetch[sessionKey]
 	if e == nil {
-		e = &honchoPrefetchEntry{}
+		e = &memoryPrefetchEntry{lastDialectic: -hs.dialecticCadence}
 		if len(hs.prefetch) >= maxHonchoCacheKeys {
 			hs.evictOldestLocked()
 		}
@@ -161,7 +176,8 @@ func (hs *HonchoSyncer) maybePrefetch(sessionKey string) {
 		hs.prefetchMu.Unlock()
 		return
 	}
-	if e.content != "" && historyLen-e.lastTurn < hs.contextCadence {
+	wantDialectic = wantDialectic && historyLen-e.lastDialectic >= hs.dialecticCadence
+	if e.content != "" && historyLen-e.lastTurn < hs.contextCadence && !wantDialectic {
 		hs.prefetchMu.Unlock()
 		return
 	}
@@ -179,13 +195,16 @@ func (hs *HonchoSyncer) maybePrefetch(sessionKey string) {
 			}
 		}()
 
-		content := hs.fetchContext(sessionKey)
+		content, usedDialectic := hs.fetchContext(sessionKey, query, wantDialectic)
 
 		hs.prefetchMu.Lock()
 		if entry := hs.prefetch[sessionKey]; entry != nil {
 			entry.inFlight = false
 			if content != "" {
 				entry.content = content
+			}
+			if usedDialectic {
+				entry.lastDialectic = historyLen
 			}
 		}
 		al := hs.loop
@@ -195,6 +214,7 @@ func (hs *HonchoSyncer) maybePrefetch(sessionKey string) {
 			logger.DebugCF("agent", "Honcho context prefetched", map[string]any{
 				"session_key": sessionKey,
 				"chars":       len([]rune(content)),
+				"dialectic":   usedDialectic,
 			})
 			if al != nil {
 				al.emitEvent(
@@ -223,9 +243,60 @@ func (hs *HonchoSyncer) evictOldestLocked() {
 	}
 }
 
-// fetchContext pulls the session summary and peer representation and renders a
-// compact memory block. Errors are logged and surfaced as an empty string.
-func (hs *HonchoSyncer) fetchContext(sessionKey string) string {
+// fetchContext builds the injected block: the base context (session summary +
+// peer representation) plus, when requested, the dialectic supplement. It
+// reports whether a dialectic answer was included so the caller can advance the
+// dialectic cadence.
+func (hs *HonchoSyncer) fetchContext(sessionKey, query string, dialectic bool) (string, bool) {
+	base := hs.fetchBaseContext(sessionKey)
+	if !dialectic {
+		return base, false
+	}
+	answer := hs.fetchDialectic(sessionKey, query)
+	if answer == "" {
+		return base, false
+	}
+	combined := strings.TrimSpace(base)
+	if combined != "" {
+		combined += "\n\n"
+	}
+	combined += "Reasoning about what matters here:\n" + answer
+	return truncateHonchoRunes(combined, maxHonchoContextRunes), true
+}
+
+// fetchDialectic asks Honcho to reason over the user's stored model for the
+// current query. Failures are logged and surfaced as an empty string.
+func (hs *HonchoSyncer) fetchDialectic(sessionKey, query string) string {
+	if hs.client == nil || strings.TrimSpace(query) == "" || strings.TrimSpace(hs.dialecticLevel) == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), honchoPrefetchTimeout)
+	defer cancel()
+
+	answer, err := hs.client.Chat(ctx, hs.workspaceID, hs.agentPeerID, honcho.ChatOptions{
+		Query:          query,
+		SessionID:      sessionKey,
+		Target:         hs.userPeerID,
+		ReasoningLevel: hs.dialecticLevel,
+	})
+	if err != nil {
+		logger.DebugCF("agent", "Honcho dialectic fetch failed", map[string]any{
+			"session_key": sessionKey,
+			"error":       err,
+		})
+		return ""
+	}
+	answer = strings.TrimSpace(answer)
+	if answer == "" {
+		return ""
+	}
+	return truncateHonchoRunes(answer, maxHonchoDialecticRunes)
+}
+
+// fetchBaseContext pulls the session summary and peer representation and
+// renders a compact memory block. Errors are logged and surfaced as an empty
+// string.
+func (hs *HonchoSyncer) fetchBaseContext(sessionKey string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), honchoPrefetchTimeout)
 	defer cancel()
 

@@ -112,6 +112,8 @@ export interface HonchoConfig {
   sync_every_turns: number
 }
 
+export type MemoryRecallMode = "hybrid" | "context" | "tools" | "off"
+
 export interface Mem0Config {
   enabled: boolean
   base_url?: string
@@ -121,6 +123,9 @@ export interface Mem0Config {
   user_id?: string
   agent_id?: string
   sync_every_turns: number
+  recall_mode: MemoryRecallMode
+  context_cadence: number
+  recall_limit: number
 }
 
 export interface RetainDBConfig {
@@ -130,7 +135,11 @@ export interface RetainDBConfig {
   api_key?: string
   clear_api_key?: boolean
   namespace?: string
+  user_id?: string
   sync_every_turns: number
+  recall_mode: MemoryRecallMode
+  context_cadence: number
+  recall_limit: number
 }
 
 export interface MemoryBackupConfig {

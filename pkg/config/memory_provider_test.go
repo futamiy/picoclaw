@@ -34,6 +34,69 @@ func TestMemoryConfig_EffectiveMemoryProvider(t *testing.T) {
 	}
 }
 
+func TestMem0RetainDB_RecallHelpers(t *testing.T) {
+	var m Mem0MemoryConfig
+	if got := m.EffectiveRecallMode(); got != DefaultMemoryRecallMode {
+		t.Fatalf("mem0 default recall = %q, want %q", got, DefaultMemoryRecallMode)
+	}
+	if got := m.EffectiveRecallMode(); got != HonchoRecallHybrid {
+		t.Fatalf("mem0 default recall = %q, want hybrid", got)
+	}
+	if !m.InjectsContext() {
+		t.Fatal("mem0 recall should inject context by default")
+	}
+	if !m.ExposesTools() {
+		t.Fatal("mem0 recall should expose tools by default")
+	}
+	if got := m.EffectiveContextCadence(); got != DefaultMemoryContextCadence {
+		t.Fatalf("mem0 cadence = %d", got)
+	}
+	if got := m.EffectiveRecallLimit(); got != DefaultMemoryRecallLimit {
+		t.Fatalf("mem0 limit = %d", got)
+	}
+	m = Mem0MemoryConfig{RecallMode: "off"}
+	if m.InjectsContext() || m.ExposesTools() {
+		t.Fatal("mem0 recall off still recalls")
+	}
+	m = Mem0MemoryConfig{RecallMode: "context"}
+	if !m.InjectsContext() || m.ExposesTools() {
+		t.Fatal("mem0 context mode should inject without tools")
+	}
+	m = Mem0MemoryConfig{RecallMode: "tools"}
+	if m.InjectsContext() || !m.ExposesTools() {
+		t.Fatal("mem0 tools mode should expose tools without injecting")
+	}
+	m = Mem0MemoryConfig{RecallMode: "bogus"}
+	if m.InjectsContext() || m.ExposesTools() {
+		t.Fatal("unknown mem0 recall mode must not recall")
+	}
+	m = Mem0MemoryConfig{RecallMode: " hybrid ", ContextCadence: 3, RecallLimit: 4}
+	if got := m.EffectiveRecallMode(); got != HonchoRecallHybrid {
+		t.Fatalf("mem0 hybrid mode = %q", got)
+	}
+	if !m.InjectsContext() {
+		t.Fatal("mem0 hybrid should inject")
+	}
+	if m.EffectiveContextCadence() != 3 || m.EffectiveRecallLimit() != 4 {
+		t.Fatalf("mem0 overrides not honored: cadence=%d limit=%d", m.EffectiveContextCadence(), m.EffectiveRecallLimit())
+	}
+
+	var r RetainDBMemoryConfig
+	if got := r.EffectiveUserID(); got != DefaultHonchoUserPeerID {
+		t.Fatalf("retaindb default user = %q", got)
+	}
+	if !r.InjectsContext() || !r.ExposesTools() {
+		t.Fatal("retaindb recall should inject and expose tools by default")
+	}
+	r = RetainDBMemoryConfig{UserID: "u1", RecallMode: "off", ContextCadence: 2, RecallLimit: 7}
+	if r.InjectsContext() || r.ExposesTools() {
+		t.Fatal("retaindb recall off still recalls")
+	}
+	if r.EffectiveUserID() != "u1" || r.EffectiveContextCadence() != 2 || r.EffectiveRecallLimit() != 7 {
+		t.Fatalf("retaindb overrides not honored: %+v", r)
+	}
+}
+
 func TestMem0RetainDB_EffectiveHelpers(t *testing.T) {
 	var m Mem0MemoryConfig
 	if got := m.EffectiveBaseURL(); got != DefaultMem0BaseURL {

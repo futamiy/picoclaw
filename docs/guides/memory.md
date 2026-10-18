@@ -76,9 +76,19 @@ The web UI exposes the same settings under the agent's **Memory** tool tab.
 ## External providers
 
 Set `provider` to mirror transcripts to an external backend. Exactly one
-backend is selected at a time; local memory always stays on. Sync is one-way
-(conversation transcripts are pushed out) and recall is injected back into the
-prompt or exposed as tools, depending on the backend.
+backend is selected at a time; local memory always stays on. Transcripts are
+pushed out at the end of a turn, and every provider can also recall memory back:
+relevant memories are prefetched in the background and injected into the prompt
+(the cache never blocks a turn).
+
+Each provider also exposes its own agent tool, registered when `recall_mode` is
+`hybrid` (default) or `tools`:
+
+| Provider | Tool | Actions |
+| --- | --- | --- |
+| Honcho | `honcho` | `context`, `profile`, `search`, `reason`, `conclude` |
+| Mem0 | `mem0` | `search`, `recent`, `add` |
+| RetainDB | `retaindb` | `search`, `profile`, `remember` |
 
 Use `base_url` to point any provider at a self-hosted instance. Leaving it
 empty uses the managed cloud default.
@@ -126,14 +136,25 @@ Honcho also supports `context_cadence`, `dialectic_cadence`, and
       "api_key": "YOUR_KEY",
       "user_id": "you",
       "agent_id": "picoclaw",
-      "sync_every_turns": 10
+      "sync_every_turns": 10,
+      "recall_mode": "context",
+      "context_cadence": 1,
+      "recall_limit": 10
     }
   }
 }
 ```
 
-`base_url` defaults to `https://api.mem0.ai`; point it at a self-hosted Mem0
-server to keep data local.
+- `base_url` — defaults to `https://api.mem0.ai`; point it at a self-hosted Mem0
+  server to keep data local.
+- `recall_mode` — `hybrid` (default: inject context and expose the `mem0`
+  tool), `context` (inject only), `tools` (tool only), or `off`.
+- `context_cadence` — minimum turns between recall prefetches (default `1`).
+- `recall_limit` — maximum memories fetched per recall (default `10`).
+
+Recall searches Mem0 with the current user message (hybrid/entity search on
+Mem0 v3, with fallbacks to older cloud and self-hosted routes) and falls back to
+the most recent memories when no query is available.
 
 ### RetainDB
 
@@ -145,13 +166,27 @@ server to keep data local.
       "enabled": true,
       "base_url": "http://localhost:8000",
       "api_key": "YOUR_KEY",
-      "sync_every_turns": 10
+      "namespace": "",
+      "user_id": "user",
+      "sync_every_turns": 10,
+      "recall_mode": "context",
+      "context_cadence": 1,
+      "recall_limit": 10
     }
   }
 }
 ```
 
-RetainDB has no cloud default — set `base_url` to your server.
+- RetainDB has no cloud default — set `base_url` to your server.
+- `namespace` maps to the RetainDB project partition; empty uses the agent ID.
+- `user_id` scopes recalled memories to the human user; empty uses `user`.
+- `recall_mode` / `context_cadence` / `recall_limit` behave as for Mem0 (the
+  tool is `retaindb`).
+
+Recall combines the user profile (`/v1/memory/profile`) with query-relevant
+search (`/v1/memory/search`), deduplicating overlapping entries. Transcripts are
+pushed to `/v1/memory/ingest/session`; the legacy `/v1/memories/` route is kept
+as a fallback for older servers.
 
 ## Backup and restore
 

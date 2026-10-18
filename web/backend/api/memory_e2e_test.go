@@ -42,7 +42,8 @@ func TestE2E_WebMemoryConfig_RoundTrip(t *testing.T) {
 		"profile_enabled": true,
 		"profile_char_limit": 3210,
 		"backup": {"enabled": true, "dir": "/tmp/picoclaw-bk", "keep": 5, "interval_hours": 6, "drift_keep": 2},
-		"mem0": {"enabled": true, "base_url": "http://mem0.local", "user_id": "u9", "agent_id": "a9", "sync_every_turns": 3}
+		"mem0": {"enabled": true, "base_url": "http://mem0.local", "user_id": "u9", "agent_id": "a9", "sync_every_turns": 3, "recall_mode": "off", "context_cadence": 4, "recall_limit": 6},
+		"retaindb": {"enabled": true, "base_url": "http://retain.local", "namespace": "p1", "user_id": "ru9", "sync_every_turns": 2, "recall_mode": "context", "context_cadence": 2, "recall_limit": 8}
 	}`
 	req := httptest.NewRequest(http.MethodPut, "/api/tools/memory-config", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -66,6 +67,13 @@ func TestE2E_WebMemoryConfig_RoundTrip(t *testing.T) {
 	}
 	if m.Mem0.UserID != "u9" || m.Mem0.AgentID != "a9" || m.Mem0.EffectiveSyncEveryTurns() != 3 {
 		t.Fatalf("mem0 config not persisted: %+v", m.Mem0)
+	}
+	if m.Mem0.InjectsContext() || m.Mem0.EffectiveContextCadence() != 4 || m.Mem0.EffectiveRecallLimit() != 6 {
+		t.Fatalf("mem0 recall config not persisted: %+v", m.Mem0)
+	}
+	if m.RetainDB.UserID != "ru9" || !m.RetainDB.InjectsContext() ||
+		m.RetainDB.EffectiveContextCadence() != 2 || m.RetainDB.EffectiveRecallLimit() != 8 {
+		t.Fatalf("retaindb recall config not persisted: %+v", m.RetainDB)
 	}
 	if !m.ProfileEnabled || m.EffectiveProfileCharLimit() != 3210 {
 		t.Fatalf("profile config not persisted: %+v", m)
@@ -91,6 +99,13 @@ func TestE2E_WebMemoryConfig_RoundTrip(t *testing.T) {
 	}
 	if resp.LongTermCharLimit != 1234 || resp.Mem0.UserID != "u9" {
 		t.Fatalf("get response limits mismatch: %+v", resp)
+	}
+	if resp.Mem0.RecallMode != config.HonchoRecallOff || resp.Mem0.ContextCadence != 4 || resp.Mem0.RecallLimit != 6 {
+		t.Fatalf("get response mem0 recall mismatch: %+v", resp.Mem0)
+	}
+	if resp.RetainDB.RecallMode != config.HonchoRecallContext || resp.RetainDB.UserID != "ru9" ||
+		resp.RetainDB.ContextCadence != 2 || resp.RetainDB.RecallLimit != 8 {
+		t.Fatalf("get response retaindb recall mismatch: %+v", resp.RetainDB)
 	}
 	if !resp.Backup.Enabled || resp.Backup.Dir != "/tmp/picoclaw-bk" || resp.Backup.Keep != 5 || resp.Backup.DriftKeep != 2 {
 		t.Fatalf("get response backup mismatch: %+v", resp.Backup)

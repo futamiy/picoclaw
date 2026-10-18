@@ -50,6 +50,7 @@ func TestNewPicoclawCommand(t *testing.T) {
 		"status",
 		"update",
 		"version",
+		"memory",
 	}
 
 	subcommands := cmd.Commands()
