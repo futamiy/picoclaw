@@ -575,7 +575,10 @@ func (p *Pipeline) CallLLM(
 			al.publishPicoReasoning(turnCtx, reasoningContent, ts.chatID, ts.sessionKey, exec.llmModelName)
 		}
 	} else {
-		go al.handleReasoning(
+		// Publish synchronously like the pico path: the async variant races
+		// turn teardown and drops the reasoning message when turnCtx is
+		// canceled before the goroutine runs.
+		al.handleReasoning(
 			turnCtx,
 			reasoningContent,
 			ts.channel,

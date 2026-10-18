@@ -797,6 +797,27 @@ func TestAgentLoop_Run_AutoContinuesLateSteeringMessage(t *testing.T) {
 		t.Fatalf("publish late inbound: %v", err)
 	}
 
+	// PublishInbound only hands the message to the receive loop; the loop
+	// still has to enqueue it as steering. Releasing the first call before
+	// the enqueue lands lets runTurnWithSteering drain an empty queue and
+	// publish the stale first response.
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer waitCancel()
+	enqueueSeen := false
+	for !enqueueSeen {
+		ts := al.getAnyActiveTurnState()
+		if ts != nil && ts.sessionKey != "" &&
+			al.pendingSteeringCountForScope(ts.sessionKey) > 0 {
+			enqueueSeen = true
+			break
+		}
+		select {
+		case <-waitCtx.Done():
+			t.Fatal("timeout waiting for late inbound to be enqueued as steering")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+
 	close(provider.releaseFirstCall)
 
 	subCtx, subCancel := context.WithTimeout(context.Background(), 5*time.Second)
