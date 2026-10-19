@@ -2116,6 +2116,41 @@ func webSearchRangeFromArgs(args map[string]any) (string, error) {
 	return rangeCode, nil
 }
 
+func buildWebSearchMeta(args map[string]any, hybrid bool, providers interface{}) string {
+	meta := make(map[string]any)
+	if hybrid {
+		meta["type"] = "auto"
+	}
+	// providers: string or []string
+	switch v := providers.(type) {
+	case string:
+		meta["provider"] = v
+	case []string:
+		if len(v) > 0 {
+			meta["provider"] = v
+		}
+	}
+	if count, ok := args["count"]; ok {
+		// only if present; echo numeric if int-like? getInt64Arg logic uses int64
+		switch t := count.(type) {
+		case int:
+			meta["count"] = t
+		case int64:
+			meta["count"] = int(t)
+		case float64:
+			meta["count"] = int(t)
+		default:
+			// try to convert
+			meta["count"] = t
+		}
+	}
+	if query, ok := args["query"].(string); ok && strings.TrimSpace(query) != "" {
+		meta["query"] = strings.TrimSpace(query)
+	}
+	b, _ := json.Marshal(meta)
+	return string(b)
+}
+
 func firstReadyProvider(pool []webSearchPoolEntry) (webSearchPoolEntry, bool) {
 	if len(pool) == 0 {
 		return webSearchPoolEntry{}, false
@@ -2250,8 +2285,11 @@ func (t *WebSearchTool) searchBoth(
 	}
 
 	merged := strings.Join(parts, "\n\n")
+	provs := []string{reas.entry.name, conv.entry.name}
+	meta := buildWebSearchMeta(args, true, provs)
+	forLLM := meta + "\n" + merged
 	return &ToolResult{
-		ForLLM:  merged,
+		ForLLM:  forLLM,
 		ForUser: merged,
 	}
 }
