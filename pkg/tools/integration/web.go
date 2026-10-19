@@ -2216,8 +2216,10 @@ func (t *WebSearchTool) searchOne(
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("search failed: %v", err))
 	}
+	meta := buildWebSearchMeta(args, false, entry.name)
+	forLLM := meta + "\n" + result
 	return &ToolResult{
-		ForLLM:  result,
+		ForLLM:  forLLM,
 		ForUser: result,
 	}
 }
