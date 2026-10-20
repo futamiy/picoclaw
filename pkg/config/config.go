@@ -1755,7 +1755,10 @@ type ToolsConfig struct {
 	WebFetch        ToolConfig         `json:"web_fetch"        yaml:"-"                                                       envPrefix:"PICOCLAW_TOOLS_WEB_FETCH_"`
 	WriteFile       ToolConfig         `json:"write_file"       yaml:"-"                                                       envPrefix:"PICOCLAW_TOOLS_WRITE_FILE_"`
 	Memory          ToolConfig         `json:"memory"           yaml:"-"                                                       envPrefix:"PICOCLAW_TOOLS_MEMORY_"`
-	SessionSearch   ToolConfig         `json:"session_search"   yaml:"-"                                                       envPrefix:"PICOCLAW_TOOLS_SESSION_SEARCH_"`
+	// SessionSearch is a pointer so an unset value is omitted from the written
+	// config. An older binary sharing this config file rejects unknown fields,
+	// so writing a default here would brick it.
+	SessionSearch *ToolConfig `json:"session_search,omitempty" yaml:"-" envPrefix:"PICOCLAW_TOOLS_SESSION_SEARCH_"`
 }
 
 // IsFilterSensitiveDataEnabled returns true if sensitive data filtering is enabled
@@ -2525,7 +2528,9 @@ func (t *ToolsConfig) IsToolEnabled(name string) bool {
 	case "memory":
 		return t.Memory.Enabled
 	case "session_search":
-		return t.SessionSearch.Enabled
+		// Unset (nil) means enabled: the tool is on by default and the field is
+		// only written when a user explicitly configures it.
+		return t.SessionSearch == nil || t.SessionSearch.Enabled
 	case "mcp":
 		return t.MCP.Enabled
 	default:

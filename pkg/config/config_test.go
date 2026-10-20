@@ -1190,6 +1190,60 @@ func TestSaveConfig_PreservesDisabledTelegramPlaceholder(t *testing.T) {
 	}
 }
 
+func TestSaveConfig_OmitsUnsetSessionSearch(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "config.json")
+
+	if err := SaveConfig(path, DefaultConfig()); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	// An older binary sharing this config rejects unknown fields, so a default
+	// tool must never be written. Regression guard for the version-skew brick.
+	if strings.Contains(string(data), "session_search") {
+		t.Fatalf("default config must not write tools.session_search, got:\n%s", string(data))
+	}
+
+	// The tool is still enabled without the field being present.
+	loaded, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if !loaded.Tools.IsToolEnabled("session_search") {
+		t.Fatal("session_search must be enabled when the config does not mention it")
+	}
+}
+
+func TestSaveConfig_PreservesExplicitDisabledSessionSearch(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "config.json")
+
+	cfg := DefaultConfig()
+	cfg.Tools.SessionSearch = &ToolConfig{Enabled: false}
+	if err := SaveConfig(path, cfg); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	// An explicit opt-out must survive, or the user could never turn it off.
+	if !strings.Contains(string(data), "session_search") {
+		t.Fatalf("explicit disable must be written, got:\n%s", string(data))
+	}
+
+	loaded, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if loaded.Tools.IsToolEnabled("session_search") {
+		t.Fatal("explicit disable was lost on round-trip")
+	}
+}
+
 func TestSaveConfig_PreservesExplicitDisabledPicoStreaming(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "config.json")

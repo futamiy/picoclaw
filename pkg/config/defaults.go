@@ -470,9 +470,9 @@ func DefaultConfig() *Config {
 			Memory: ToolConfig{
 				Enabled: true,
 			},
-			SessionSearch: ToolConfig{
-				Enabled: true,
-			},
+			// SessionSearch is intentionally left unset (nil): it is enabled by
+			// default via IsToolEnabled, and omitting it keeps the written config
+			// readable by older binaries that reject unknown fields.
 			MCP: MCPConfig{
 				ToolConfig: ToolConfig{
 					Enabled: false,
