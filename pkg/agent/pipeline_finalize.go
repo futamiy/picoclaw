@@ -23,6 +23,13 @@ func (p *Pipeline) Finalize(
 ) (turnResult, error) {
 	al := p.al
 
+	// Async long-term memory extraction, gated by its own turn cadence. Runs
+	// before the allResponsesHandled early return so turns that end after tool
+	// delivery are curated too.
+	if mm := ts.agent.Memory; mm != nil {
+		mm.MaybeExtract(al, ts.sessionKey)
+	}
+
 	// When allResponsesHandled=true, ExecuteTools already finalized
 	// (added handledToolResponseSummary, saved session, set phase to Completed).
 	// But still check for hard abort - if requested, abort the turn.
@@ -76,10 +83,8 @@ func (p *Pipeline) Finalize(
 		)
 	}
 
-	// Async long-term memory extraction, gated by its own turn cadence.
-	if mm := ts.agent.Memory; mm != nil {
-		mm.MaybeExtract(al, ts.sessionKey)
-	}
+	// Async long-term memory extraction already ran above (before the
+	// allResponsesHandled early return), so it is not repeated here.
 
 	// Optional Honcho transcript sync, gated by its own turn cadence.
 	if hs := ts.agent.MemorySync; hs != nil {

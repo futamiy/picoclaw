@@ -63,15 +63,52 @@ Memory is configured under `agents.defaults.memory`:
 | `daily_notes_enabled` | `true` | Write and read dated daily notes. |
 | `daily_notes_days` | `3` | How many recent days of notes are injected. |
 | `daily_note_char_limit` | `2200` | Cap for each daily note file. |
-| `extract_enabled` | `false` | Run the end-of-turn memory extraction pipeline. |
-| `extract_every_turns` | `10` | Extract once every N completed turns. |
+| `extract_enabled` | `true` | Run the end-of-turn memory extraction pipeline. |
+| `extract_every_turns` | `10` | Extract once every N completed user turns. |
 | `extract_model` | (unset) | Optional cheaper model used for extraction. |
+
+> **Upgrading from an older config:** `SaveConfig` writes every field, so an
+> existing `config.json` already contains an explicit `"extract_enabled": false`.
+> Changing the default does not rewrite it — set it to `true` yourself (or via
+> the web UI) to enable curation.
+
+Extraction counts **user turns**, not messages, so one agentic turn with many
+tool calls advances the cadence by exactly one. It runs on every finalization
+path, including turns that end because a tool already delivered the answer.
 
 Every key has a matching environment variable, e.g.
 `PICOCLAW_AGENTS_DEFAULTS_MEMORY_ENABLED` and
 `PICOCLAW_AGENTS_DEFAULTS_MEMORY_LONG_TERM_CHAR_LIMIT`.
 
 The web UI exposes the same settings under the agent's **Memory** tool tab.
+
+### `USER.md` vs `PROFILE.md`
+
+These are different files with similar names:
+
+| | `workspace/USER.md` | `workspace/memory/PROFILE.md` |
+| --- | --- | --- |
+| Written by | you, by hand | the agent, via `memory` target `profile` |
+| Bound | none | `profile_char_limit` (1375 runes) |
+| Prompt block | `## USER.md` | `## User Profile` |
+| Purpose | the identity contract you define | what the agent has learned about you |
+
+Both are tracked for prompt-cache invalidation, so an agent write to
+`PROFILE.md` is visible on the next turn without a restart.
+
+## Recalling past sessions
+
+The `session_search` tool reads `workspace/sessions/*.jsonl` directly — no
+index, no network, no LLM call. Give it a literal (`regex: false`, default) or a
+regex (`regex: true`) and optionally a `role` filter; it returns up to 10
+snippets from the 50 most recently modified sessions, newest first. For full
+context, read the session file with `read_file`.
+
+```json
+{ "tools": { "session_search": { "enabled": true } } }
+```
+
+Disable it with `"enabled": false` or `PICOCLAW_TOOLS_SESSION_SEARCH_ENABLED=false`.
 
 ## External providers
 

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -210,5 +211,48 @@ func TestMemoryManager_ExtractionFailureNoCountAdvance(t *testing.T) {
 
 	if payload := mm.runExtraction("s1"); payload != nil {
 		t.Fatalf("unparsable LLM output must yield nil payload, got %+v", payload)
+	}
+}
+
+func TestCountUserTurns(t *testing.T) {
+	history := []providers.Message{
+		{Role: "user", Content: "one"},
+		{Role: "assistant", Content: ""},
+		{Role: "tool", Content: "r1"},
+		{Role: "tool", Content: "r2"},
+		{Role: "assistant", Content: "done"},
+		{Role: "user", Content: "two"},
+	}
+	if got := countUserTurns(history); got != 2 {
+		t.Fatalf("countUserTurns = %d, want 2 (tool messages must not count)", got)
+	}
+	if got := countUserTurns(nil); got != 0 {
+		t.Fatalf("countUserTurns(nil) = %d, want 0", got)
+	}
+}
+
+// A long agentic turn must advance the cadence by exactly one, not once per
+// tool message.
+func TestMaybeExtract_CadenceCountsTurnsNotMessages(t *testing.T) {
+	dir := t.TempDir()
+	sessions := session.NewSessionManager(filepath.Join(dir, "sessions"))
+	store := NewMemoryStoreWithOptions(dir, MemoryOptions{LongTermCharLimit: 5000})
+	agent := &AgentInstance{ID: "a1", Model: "m", Workspace: dir, Sessions: sessions}
+	mm := newMemoryManager(agent, store, MemoryExtractOptions{EveryTurns: 2}, nil)
+
+	sessions.AddFullMessage("s1", providers.Message{Role: "user", Content: "do the thing"})
+	for i := 0; i < 3; i++ {
+		sessions.AddFullMessage("s1", providers.Message{Role: "assistant", Content: ""})
+		sessions.AddFullMessage("s1", providers.Message{Role: "tool", Content: "result"})
+	}
+
+	if turns := countUserTurns(sessions.GetHistory("s1")); turns != 1 {
+		t.Fatalf("fixture should hold 1 user turn, got %d", turns)
+	}
+	mm.countMu.Lock()
+	last := mm.counts["s1"]
+	mm.countMu.Unlock()
+	if last != 0 {
+		t.Fatalf("counts advanced without a completed extraction: %d", last)
 	}
 }

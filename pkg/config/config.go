@@ -1755,6 +1755,7 @@ type ToolsConfig struct {
 	WebFetch        ToolConfig         `json:"web_fetch"        yaml:"-"                                                       envPrefix:"PICOCLAW_TOOLS_WEB_FETCH_"`
 	WriteFile       ToolConfig         `json:"write_file"       yaml:"-"                                                       envPrefix:"PICOCLAW_TOOLS_WRITE_FILE_"`
 	Memory          ToolConfig         `json:"memory"           yaml:"-"                                                       envPrefix:"PICOCLAW_TOOLS_MEMORY_"`
+	SessionSearch   ToolConfig         `json:"session_search"   yaml:"-"                                                       envPrefix:"PICOCLAW_TOOLS_SESSION_SEARCH_"`
 }
 
 // IsFilterSensitiveDataEnabled returns true if sensitive data filtering is enabled
@@ -2523,6 +2524,8 @@ func (t *ToolsConfig) IsToolEnabled(name string) bool {
 		return t.WriteFile.Enabled
 	case "memory":
 		return t.Memory.Enabled
+	case "session_search":
+		return t.SessionSearch.Enabled
 	case "mcp":
 		return t.MCP.Enabled
 	default:

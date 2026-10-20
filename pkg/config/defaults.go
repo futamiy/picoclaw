@@ -60,7 +60,7 @@ func DefaultConfig() *Config {
 					DailyNotesEnabled:  true,
 					DailyNotesDays:     DefaultMemoryDailyNotesDays,
 					DailyNoteCharLimit: DefaultMemoryDailyNoteCharLimit,
-					ExtractEnabled:     false,
+					ExtractEnabled:     true,
 					ExtractEveryTurns:  DefaultMemoryExtractEveryTurns,
 					Backup: MemoryBackupConfig{
 						Enabled:       false,
@@ -468,6 +468,9 @@ func DefaultConfig() *Config {
 				Enabled: false,
 			},
 			Memory: ToolConfig{
+				Enabled: true,
+			},
+			SessionSearch: ToolConfig{
 				Enabled: true,
 			},
 			MCP: MCPConfig{

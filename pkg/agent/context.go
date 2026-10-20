@@ -174,9 +174,17 @@ func (cb *ContextBuilder) getIdentity(includeToolUseRule bool) string {
 		rules = append(
 			rules,
 			fmt.Sprintf(
-				"**Memory** - When something seems worth remembering, use the `memory` tool "+
-					"(action `add`/`replace`/`remove`; or `note` for dated daily context) instead of "+
-					"editing %s/memory/MEMORY.md directly. Keep entries concise; the store is bounded.",
+				"**Memory** - Persistent memory is the narrow exception for facts that apply to every "+
+					"session regardless of task: who the user is (target `profile`), environment facts, and "+
+					"standing conventions (target `memory`). Procedures, pitfalls and task-specific "+
+					"preferences belong in a skill, not in memory. Ephemeral task state belongs in the "+
+					"conversation. Write entries as declarative facts (\"User prefers concise responses\"), "+
+					"never as instructions to yourself (\"Always respond concisely\") — imperative phrasing "+
+					"gets re-read as a directive later and can override the user's current request. Use the "+
+					"`memory` tool (action `add`/`replace`/`remove`; `note` for dated daily context; batch "+
+					"`operations` to consolidate) instead of editing %s/memory/MEMORY.md directly. The store "+
+					"is bounded: when it fills, replace or consolidate stale entries rather than skipping "+
+					"the save.",
 				workspacePath,
 			),
 		)
@@ -551,6 +559,9 @@ func (cb *ContextBuilder) sourcePaths() []string {
 	agentDefinition := cb.LoadAgentDefinition()
 	paths := agentDefinition.trackedPaths(cb.workspace)
 	paths = append(paths, filepath.Join(cb.workspace, "memory", "MEMORY.md"))
+	if cb.memory != nil && cb.memory.ProfileEnabled() {
+		paths = append(paths, filepath.Join(cb.workspace, "memory", "PROFILE.md"))
+	}
 	if cb.memory != nil && cb.memory.DailyNotesEnabled() {
 		paths = append(paths, cb.memory.recentDailyNotePaths(cb.memory.opts.DailyNotesDays)...)
 	}

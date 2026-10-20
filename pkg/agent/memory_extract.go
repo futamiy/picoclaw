@@ -63,8 +63,8 @@ func newMemoryManager(agent *AgentInstance, store *MemoryStore, opts MemoryExtra
 	}
 }
 
-// MaybeExtract kicks off an async extraction when at least everyTurns new
-// messages have accumulated in the session since the last run. Extraction is
+// MaybeExtract kicks off an async extraction when at least everyTurns new user
+// turns have accumulated in the session since the last run. Extraction is
 // best-effort; failures are logged and retried on later turns.
 func (m *MemoryManager) MaybeExtract(al *AgentLoop, sessionKey string) {
 	agent := m.agent
@@ -73,14 +73,17 @@ func (m *MemoryManager) MaybeExtract(al *AgentLoop, sessionKey string) {
 	}
 
 	history := agent.Sessions.GetHistory(sessionKey)
-	if len(history) == 0 {
+	// Count user turns, not messages: one turn with several tool calls must not
+	// advance the cadence by more than one.
+	turns := countUserTurns(history)
+	if turns == 0 {
 		return
 	}
 
 	m.countMu.Lock()
 	last := m.counts[sessionKey]
 	m.countMu.Unlock()
-	if len(history)-last < m.everyTurns {
+	if turns-last < m.everyTurns {
 		return
 	}
 
@@ -105,7 +108,7 @@ func (m *MemoryManager) MaybeExtract(al *AgentLoop, sessionKey string) {
 			return
 		}
 		m.countMu.Lock()
-		m.counts[sessionKey] = len(history)
+		m.counts[sessionKey] = turns
 		m.countMu.Unlock()
 		al.emitEvent(
 			runtimeevents.KindAgentMemoryExtract,
@@ -113,6 +116,17 @@ func (m *MemoryManager) MaybeExtract(al *AgentLoop, sessionKey string) {
 			*payload,
 		)
 	}()
+}
+
+// countUserTurns counts user messages in history; one user message == one turn.
+func countUserTurns(history []providers.Message) int {
+	n := 0
+	for _, msg := range history {
+		if msg.Role == "user" {
+			n++
+		}
+	}
+	return n
 }
 
 // runExtraction performs one LLM-driven memory curation pass.

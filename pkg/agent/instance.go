@@ -205,6 +205,9 @@ func NewAgentInstance(
 	if cfg.Agents.Defaults.Memory.Enabled && cfg.Tools.IsToolEnabled("memory") {
 		toolsRegistry.Register(memorytool.NewMemoryTool(contextBuilder.Memory()))
 	}
+	if cfg.Tools.IsToolEnabled("session_search") {
+		toolsRegistry.Register(tools.NewSessionSearchTool(sessionsDir))
+	}
 	agentID := routing.DefaultAgentID
 	agentName := ""
 	var subagents *config.SubagentsConfig

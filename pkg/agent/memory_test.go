@@ -201,3 +201,66 @@ func TestMemoryStore_PathLayout(t *testing.T) {
 		t.Fatalf("memory dir should be created: %v", err)
 	}
 }
+
+// Models re-type typography: a curly quote or an em dash in stored text must
+// still be addressable with the straight ASCII forms.
+func TestMemoryReplace_TypographyFold(t *testing.T) {
+	ms := newTestMemoryStore(t, 500)
+	if err := ms.WriteLongTerm("User said \u201cship it\u201d \u2014 then left\n"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := ms.ReplaceEntry(TargetMemory, `User said "ship it" - then left`, "User said ship it later"); err != nil {
+		t.Fatalf("folded replace should match: %v", err)
+	}
+	if got := ms.ReadLongTerm(); !strings.Contains(got, "ship it later") {
+		t.Fatalf("replace not applied: %q", got)
+	}
+}
+
+func TestMemoryRemove_TypographyFold(t *testing.T) {
+	ms := newTestMemoryStore(t, 500)
+	if err := ms.WriteLongTerm("keep me\nUser prefers \u201ctabs\u201d\n"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := ms.RemoveEntry(TargetMemory, `prefers "tabs"`); err != nil {
+		t.Fatalf("folded remove should match: %v", err)
+	}
+	if got := ms.ReadLongTerm(); strings.Contains(got, "tabs") || !strings.Contains(got, "keep me") {
+		t.Fatalf("remove not applied correctly: %q", got)
+	}
+}
+
+// A failed match must name the closest entries instead of a bare "not found".
+func TestMemoryReplace_NoMatchSuggestsClosest(t *testing.T) {
+	ms := newTestMemoryStore(t, 500)
+	if err := ms.WriteLongTerm("User prefers concise responses in Indonesian\n"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	err := ms.ReplaceEntry(TargetMemory, "user likes short replies indonesian", "x")
+	if err == nil {
+		t.Fatal("expected error for non-matching old_text")
+	}
+	if !strings.Contains(err.Error(), "closest entries") {
+		t.Fatalf("error should suggest closest entries, got %q", err.Error())
+	}
+}
+
+// Punctuation-only needles must never select a line.
+func TestMemoryFoldLines_PunctuationOnlyMatchesNothing(t *testing.T) {
+	lines := []string{"alpha beta", "---"}
+	if got := memoryFoldLines(lines, "\u2014\u2014"); len(got) != 0 {
+		t.Fatalf("punctuation-only needle matched lines %v", got)
+	}
+}
+
+// The injected memory block must be framed as data, not instructions.
+func TestGetMemoryContext_FramedAsData(t *testing.T) {
+	ms := newTestMemoryStore(t, 1000)
+	if err := ms.WriteLongTerm("fact\n"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	ctx := ms.GetMemoryContext()
+	if !strings.Contains(ctx, "not instructions") {
+		t.Fatalf("memory context should carry a data-not-instructions preamble:\n%s", ctx)
+	}
+}

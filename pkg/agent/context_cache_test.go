@@ -214,6 +214,13 @@ func TestMtimeAutoInvalidation(t *testing.T) {
 			contentV2:  "# Memory\nUser likes Rust.",
 			checkField: "User likes Rust",
 		},
+		{
+			name:       "profile file change",
+			file:       "memory/PROFILE.md",
+			contentV1:  "prefers tabs",
+			contentV2:  "prefers spaces",
+			checkField: "prefers spaces",
+		},
 	}
 
 	for _, tt := range tests {
