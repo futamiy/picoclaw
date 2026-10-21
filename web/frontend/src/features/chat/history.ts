@@ -120,3 +120,26 @@ export function mergeHistoryMessages(
       comparableTimestamp(right.timestamp),
   )
 }
+
+// appendHistoryTail returns historyMessages when currentMessages is a prefix of
+// it (same role/content order), otherwise currentMessages. Used after a
+// reconnect to pick up replies that were delivered while the socket was down
+// without duplicating messages already on screen.
+export function appendHistoryTail(
+  historyMessages: ChatMessage[],
+  currentMessages: ChatMessage[],
+): ChatMessage[] {
+  if (currentMessages.length >= historyMessages.length) {
+    return currentMessages
+  }
+
+  for (let i = 0; i < currentMessages.length; i += 1) {
+    const current = currentMessages[i]
+    const history = historyMessages[i]
+    if (current.role !== history.role || current.content !== history.content) {
+      return currentMessages
+    }
+  }
+
+  return historyMessages
+}

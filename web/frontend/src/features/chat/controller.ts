@@ -2,6 +2,7 @@ import { getDefaultStore } from "jotai"
 import { toast } from "sonner"
 
 import {
+  appendHistoryTail,
   loadSessionMessages,
   mergeHistoryMessages,
 } from "@/features/chat/history"
@@ -164,6 +165,7 @@ export async function connectChat() {
       updateChatStore({ connectionState: "connected" })
       isConnecting = false
       reconnectAttempts = 0
+      void refreshSessionTail(sessionId)
     }
 
     socket.onmessage = (event) => {
@@ -313,6 +315,23 @@ export async function hydrateActiveSession() {
     })
 
   return hydratePromise
+}
+
+// refreshSessionTail re-reads the session history after a (re)connect so replies
+// delivered while the socket was down appear without a page reload.
+async function refreshSessionTail(sessionId: string) {
+  try {
+    const historyMessages = await loadSessionMessages(sessionId)
+    const currentState = getChatState()
+    if (currentState.activeSessionId !== sessionId) {
+      return
+    }
+    updateChatStore({
+      messages: appendHistoryTail(historyMessages, currentState.messages),
+    })
+  } catch (error) {
+    console.error("Failed to refresh session history:", error)
+  }
 }
 
 interface SendChatMessageInput {
