@@ -232,6 +232,21 @@ func (c *TelegramChannel) Stop(ctx context.Context) error {
 	return nil
 }
 
+// Probe implements channels.ProbeCapable by calling getMe: it verifies DNS,
+// TLS, the bot token, and that Telegram itself is reachable.
+func (c *TelegramChannel) Probe(ctx context.Context) error {
+	if !c.IsRunning() {
+		return channels.ErrNotRunning
+	}
+	if c.bot == nil {
+		return fmt.Errorf("telegram bot is not initialized: %w", channels.ErrNotRunning)
+	}
+	if _, err := c.bot.GetMe(ctx); err != nil {
+		return fmt.Errorf("telegram getMe: %w", err)
+	}
+	return nil
+}
+
 func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) ([]string, error) {
 	if !c.IsRunning() {
 		return nil, channels.ErrNotRunning

@@ -78,6 +78,7 @@ func (m *Manager) publishOutboundSent(
 	msg bus.OutboundMessage,
 	messageIDs []string,
 ) {
+	m.recordChannelSent(channelName)
 	m.publishChannelEvent(
 		runtimeevents.KindChannelMessageOutboundSent,
 		channelName,
@@ -122,6 +123,7 @@ func (m *Manager) publishOutboundFailed(
 	if err != nil {
 		payload.Error = err.Error()
 	}
+	m.recordChannelError(channelName, err)
 	m.publishChannelEvent(
 		runtimeevents.KindChannelMessageOutboundFailed,
 		channelName,

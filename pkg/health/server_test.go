@@ -356,3 +356,68 @@ func TestStatusString(t *testing.T) {
 		}
 	}
 }
+
+func TestProbeHandler_MethodNotAllowed(t *testing.T) {
+	s := newTestServer()
+
+	req := httptest.NewRequest(http.MethodGet, "/probe", nil)
+	w := httptest.NewRecorder()
+
+	s.probeHandler(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("probe GET status = %d, want %d", w.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestProbeHandler_RequiresToken(t *testing.T) {
+	s := newTestServer()
+	s.SetProbeFunc(func(context.Context) any { return map[string]any{"ok": true} })
+
+	req := httptest.NewRequest(http.MethodPost, "/probe", nil)
+	w := httptest.NewRecorder()
+
+	s.probeHandler(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("probe without token = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestProbeHandler_NoProbeFunc(t *testing.T) {
+	s := newTestServer()
+
+	req := httptest.NewRequest(http.MethodPost, "/probe", nil)
+	req.Header.Set("Authorization", "Bearer test")
+	w := httptest.NewRecorder()
+
+	s.probeHandler(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("probe without func = %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestProbeHandler_ReturnsProbeResult(t *testing.T) {
+	s := newTestServer()
+	s.SetProbeFunc(func(context.Context) any {
+		return map[string]any{"model": map[string]any{"ok": true}}
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/probe", nil)
+	req.Header.Set("Authorization", "Bearer test")
+	w := httptest.NewRecorder()
+
+	s.probeHandler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("probe status = %d, want %d", w.Code, http.StatusOK)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode probe body: %v", err)
+	}
+	if _, ok := body["model"]; !ok {
+		t.Fatalf("probe body = %v, want model key", body)
+	}
+}

@@ -243,6 +243,7 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) (runEr
 	}
 	runningServices.HealthServer.SetReloadFunc(reloadTrigger)
 	agentLoop.SetReloadFunc(reloadTrigger)
+	runningServices.HealthServer.SetProbeFunc(connectivityProbe(agentLoop, runningServices.ChannelManager))
 
 	for _, bindHost := range listenResult.BindHosts {
 		fmt.Printf("✓ Gateway started on %s\n", net.JoinHostPort(bindHost, strconv.Itoa(cfg.Gateway.Port)))

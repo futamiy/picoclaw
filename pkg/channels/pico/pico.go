@@ -245,6 +245,18 @@ func (c *PicoChannel) currentConnCount() int {
 	return len(c.connections)
 }
 
+// Probe implements channels.ProbeCapable. Pico is in-process, so connectivity
+// is simply "running with at least one attached WebSocket client".
+func (c *PicoChannel) Probe(_ context.Context) error {
+	if !c.IsRunning() {
+		return channels.ErrNotRunning
+	}
+	if c.currentConnCount() == 0 {
+		return fmt.Errorf("no WebUI client connected")
+	}
+	return nil
+}
+
 // Start implements Channel.
 func (c *PicoChannel) Start(ctx context.Context) error {
 	logger.InfoC("pico", "Starting Pico Protocol channel")

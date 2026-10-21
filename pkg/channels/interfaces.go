@@ -74,6 +74,13 @@ type StreamingCapable interface {
 	BeginStream(ctx context.Context, chatID string) (Streamer, error)
 }
 
+// ProbeCapable — channels that can actively verify connectivity to their
+// upstream platform (e.g. a Telegram getMe call). Probe is a real network
+// round-trip and must be called only on explicit user request.
+type ProbeCapable interface {
+	Probe(ctx context.Context) error
+}
+
 // Streamer is defined in pkg/bus to avoid circular imports.
 // This alias keeps channel implementations using channels.Streamer unchanged.
 type Streamer = bus.Streamer

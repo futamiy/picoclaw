@@ -20,6 +20,7 @@ type Server struct {
 	checks     map[string]Check
 	startTime  time.Time
 	reloadFunc func() error
+	probeFunc  func(ctx context.Context) any
 	authToken  string // optional bearer token for protected endpoints
 }
 
@@ -49,6 +50,7 @@ func NewServer(host string, port int, token string) *Server {
 	mux.HandleFunc("/health", s.healthHandler)
 	mux.HandleFunc("/ready", s.readyHandler)
 	mux.HandleFunc("/reload", s.reloadHandler)
+	mux.HandleFunc("/probe", s.probeHandler)
 
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	s.server = &http.Server{
@@ -117,6 +119,49 @@ func (s *Server) SetReloadFunc(fn func() error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reloadFunc = fn
+}
+
+// SetProbeFunc sets the callback that actively tests connectivity (model and
+// channels). It is only invoked on an explicit POST /probe request.
+func (s *Server) SetProbeFunc(fn func(ctx context.Context) any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.probeFunc = fn
+}
+
+func (s *Server) probeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "method not allowed, use POST"})
+		return
+	}
+
+	s.mu.RLock()
+	requiredToken := s.authToken
+	probeFunc := s.probeFunc
+	s.mu.RUnlock()
+
+	if requiredToken != "" {
+		given := extractBearerToken(r.Header.Get("Authorization"))
+		if given == "" || subtle.ConstantTimeCompare([]byte(given), []byte(requiredToken)) != 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+			return
+		}
+	}
+
+	if probeFunc == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": "probe not configured"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(probeFunc(r.Context()))
 }
 
 func (s *Server) reloadHandler(w http.ResponseWriter, r *http.Request) {
@@ -231,6 +276,7 @@ func (s *Server) RegisterOnMux(mux HandlerMux) {
 	mux.HandleFunc("/health", s.healthHandler)
 	mux.HandleFunc("/ready", s.readyHandler)
 	mux.HandleFunc("/reload", s.reloadHandler)
+	mux.HandleFunc("/probe", s.probeHandler)
 }
 
 func statusString(ok bool) string {

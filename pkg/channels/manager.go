@@ -102,6 +102,7 @@ type Manager struct {
 	streamActive              sync.Map          // streamSuppressionKey → true (set when streamer.Finalize sent the message)
 	streamAuxiliaryTombstones sync.Map          // streamSuppressionKey → time.Time (drops late auxiliary messages after stream final)
 	channelHashes             map[string]string // channel name → config hash
+	channelHealth             sync.Map          // channel name → ChannelHealth (last activity/error)
 }
 
 type mediaStoreSetter interface {
@@ -2116,13 +2117,17 @@ func (m *Manager) SendMessage(ctx context.Context, msg bus.OutboundMessage) erro
 		for _, chunk := range chunks {
 			chunkMsg := msg
 			chunkMsg.Content = chunk
-			m.sendWithRetry(ctx, channelName, w, chunkMsg)
+			if _, sent := m.sendWithRetry(ctx, channelName, w, chunkMsg); !sent {
+				return fmt.Errorf("send to %s failed: %w", channelName, ErrSendFailed)
+			}
 		}
 	} else {
 		if len(chunks) == 1 {
 			msg.Content = chunks[0]
 		}
-		m.sendWithRetry(ctx, channelName, w, msg)
+		if _, sent := m.sendWithRetry(ctx, channelName, w, msg); !sent {
+			return fmt.Errorf("send to %s failed: %w", channelName, ErrSendFailed)
+		}
 	}
 	return nil
 }
