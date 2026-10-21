@@ -13,7 +13,8 @@
     "show_more_channels": "Mais",
     "show_less_channels": "Menos",
     "config": "Configuração",
-    "logs": "Logs"
+    "logs": "Logs",
+    "status": "Status"
   },
   "launcherLogin": {
     "title": "Entrar",
@@ -1093,5 +1094,19 @@
       "title": "Ver Documentação",
       "description": "Precisa de mais ajuda? Clique no botão de documentação no canto superior direito para ver guias detalhados e documentação de configuração."
     }
+  },
+  "status": {
+    "gateway": "Gateway",
+    "model": "Modelo",
+    "channels": "Canais",
+    "test": "Testar conexão",
+    "latency": "Latência",
+    "uptime": "Tempo ativo",
+    "checked_at": "Verificado",
+    "last_sent": "Último envio",
+    "stopped": "parado",
+    "no_model": "Nenhum modelo configurado",
+    "no_channels": "Nenhum canal configurado",
+    "channels_hint": "Testado ao abrir a página. Não é consultado em segundo plano."
   }
 }

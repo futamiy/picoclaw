@@ -13,7 +13,8 @@
     "show_more_channels": "More",
     "show_less_channels": "Less",
     "config": "Config",
-    "logs": "Logs"
+    "logs": "Logs",
+    "status": "Status"
   },
   "launcherLogin": {
     "title": "Sign in",
@@ -1120,5 +1121,19 @@
       "title": "View Documentation",
       "description": "Need more help? Click the documentation button in the top right corner to view detailed guides and configuration docs."
     }
+  },
+  "status": {
+    "gateway": "Gateway",
+    "model": "Model",
+    "channels": "Channels",
+    "test": "Test connection",
+    "latency": "Latency",
+    "uptime": "Uptime",
+    "checked_at": "Checked",
+    "last_sent": "Last sent",
+    "stopped": "stopped",
+    "no_model": "No model configured",
+    "no_channels": "No channels configured",
+    "channels_hint": "Tested when this page opens. Not polled in the background."
   }
 }

@@ -13,7 +13,8 @@
     "show_more_channels": "更多",
     "show_less_channels": "收起",
     "config": "配置",
-    "logs": "日志"
+    "logs": "日志",
+    "status": "状态"
   },
   "launcherLogin": {
     "title": "登录",
@@ -1093,5 +1094,19 @@
       "title": "查看文档",
       "description": "需要更多帮助？点击右上角的文档按钮，查看详细的使用文档和配置指南。"
     }
+  },
+  "status": {
+    "gateway": "网关",
+    "model": "模型",
+    "channels": "渠道",
+    "test": "测试连接",
+    "latency": "延迟",
+    "uptime": "运行时间",
+    "checked_at": "检查时间",
+    "last_sent": "最后发送",
+    "stopped": "已停止",
+    "no_model": "未配置模型",
+    "no_channels": "未配置渠道",
+    "channels_hint": "打开页面时测试一次，不在后台轮询。"
   }
 }

@@ -13,7 +13,8 @@
     "show_more_channels": "Více",
     "show_less_channels": "Méně",
     "config": "Nastavení",
-    "logs": "Logy"
+    "logs": "Logy",
+    "status": "Stav"
   },
   "launcherLogin": {
     "title": "Přihlášení",
@@ -1091,5 +1092,19 @@
       "title": "Zobrazit dokumentaci",
       "description": "Potřebujete další pomoc? Klikněte na tlačítko dokumentace v pravém horním rohu pro zobrazení podrobných průvodců a dokumentace ke konfiguraci."
     }
+  },
+  "status": {
+    "gateway": "Gateway",
+    "model": "Model",
+    "channels": "Kanály",
+    "test": "Otestovat připojení",
+    "latency": "Latence",
+    "uptime": "Doba běhu",
+    "checked_at": "Zkontrolováno",
+    "last_sent": "Naposledy odesláno",
+    "stopped": "zastaveno",
+    "no_model": "Není nastaven model",
+    "no_channels": "Nejsou nastaveny kanály",
+    "channels_hint": "Testuje se při otevření stránky. Na pozadí se neopakuje."
   }
 }
