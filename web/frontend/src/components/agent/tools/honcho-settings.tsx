@@ -1,7 +1,11 @@
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 
-import type { HonchoConfig } from "@/api/tools"
+import type {
+  HonchoConfig,
+  HonchoDialecticLevel,
+  MemoryRecallMode,
+} from "@/api/tools"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -202,6 +206,165 @@ export function HonchoSettings({
             value={draft.sync_every_turns}
             onChange={(event) =>
               onUpdate({ sync_every_turns: Number(event.target.value) })
+            }
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t("pages.agent.tools.memory.honcho.recall_mode", "Recall Mode")}
+          description={t(
+            "pages.agent.tools.memory.honcho.recall_mode_hint",
+            "Hybrid injects context and exposes tools; Context injects only; Tools exposes only; Off disables recall.",
+          )}
+        >
+          <Select
+            value={draft.recall_mode || "hybrid"}
+            onValueChange={(value) =>
+              onUpdate({ recall_mode: value as MemoryRecallMode })
+            }
+          >
+            <SelectTrigger className="bg-muted/40 hover:bg-muted/60 focus:ring-foreground/5 focus:border-border/80 w-full rounded-xl border-transparent shadow-none transition-all sm:w-64">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="border-border/40 rounded-xl shadow-lg">
+              <SelectItem value="hybrid" className="rounded-lg">
+                {t(
+                  "pages.agent.tools.memory.honcho.recall_mode_hybrid",
+                  "Hybrid",
+                )}
+              </SelectItem>
+              <SelectItem value="context" className="rounded-lg">
+                {t(
+                  "pages.agent.tools.memory.honcho.recall_mode_context",
+                  "Context only",
+                )}
+              </SelectItem>
+              <SelectItem value="tools" className="rounded-lg">
+                {t(
+                  "pages.agent.tools.memory.honcho.recall_mode_tools",
+                  "Tools only",
+                )}
+              </SelectItem>
+              <SelectItem value="off" className="rounded-lg">
+                {t("pages.agent.tools.memory.honcho.recall_mode_off", "Off")}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingRow>
+
+        <SettingRow
+          label={t(
+            "pages.agent.tools.memory.honcho.context_cadence",
+            "Recall Cadence",
+          )}
+          description={t(
+            "pages.agent.tools.memory.honcho.context_cadence_hint",
+            "Fetch memory context once every N completed turns. 0 uses the default.",
+          )}
+        >
+          <Input
+            type="number"
+            min={0}
+            className="bg-muted/40 hover:bg-muted/60 focus-visible:bg-background focus-visible:border-border/80 focus-visible:ring-foreground/5 w-full rounded-xl border-transparent shadow-none transition-all duration-300 sm:w-32"
+            value={draft.context_cadence ?? 0}
+            onChange={(event) =>
+              onUpdate({ context_cadence: Number(event.target.value) })
+            }
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t(
+            "pages.agent.tools.memory.honcho.dialectic_level",
+            "Reasoning Level",
+          )}
+          description={t(
+            "pages.agent.tools.memory.honcho.dialectic_level_hint",
+            "Depth of Honcho's background reasoning over your conversations.",
+          )}
+        >
+          <Select
+            value={draft.dialectic_level || "low"}
+            onValueChange={(value) =>
+              onUpdate({ dialectic_level: value as HonchoDialecticLevel })
+            }
+          >
+            <SelectTrigger className="bg-muted/40 hover:bg-muted/60 focus:ring-foreground/5 focus:border-border/80 w-full rounded-xl border-transparent shadow-none transition-all sm:w-64">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="border-border/40 rounded-xl shadow-lg">
+              <SelectItem value="minimal" className="rounded-lg">
+                {t(
+                  "pages.agent.tools.memory.honcho.dialectic_level_minimal",
+                  "Minimal",
+                )}
+              </SelectItem>
+              <SelectItem value="low" className="rounded-lg">
+                {t(
+                  "pages.agent.tools.memory.honcho.dialectic_level_low",
+                  "Low",
+                )}
+              </SelectItem>
+              <SelectItem value="medium" className="rounded-lg">
+                {t(
+                  "pages.agent.tools.memory.honcho.dialectic_level_medium",
+                  "Medium",
+                )}
+              </SelectItem>
+              <SelectItem value="high" className="rounded-lg">
+                {t(
+                  "pages.agent.tools.memory.honcho.dialectic_level_high",
+                  "High",
+                )}
+              </SelectItem>
+              <SelectItem value="max" className="rounded-lg">
+                {t(
+                  "pages.agent.tools.memory.honcho.dialectic_level_max",
+                  "Max",
+                )}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingRow>
+
+        <SettingRow
+          label={t(
+            "pages.agent.tools.memory.honcho.dialectic_cadence",
+            "Reasoning Cadence",
+          )}
+          description={t(
+            "pages.agent.tools.memory.honcho.dialectic_cadence_hint",
+            "Run background reasoning once every N completed turns. 0 uses the default.",
+          )}
+        >
+          <Input
+            type="number"
+            min={0}
+            className="bg-muted/40 hover:bg-muted/60 focus-visible:bg-background focus-visible:border-border/80 focus-visible:ring-foreground/5 w-full rounded-xl border-transparent shadow-none transition-all duration-300 sm:w-32"
+            value={draft.dialectic_cadence ?? 0}
+            onChange={(event) =>
+              onUpdate({ dialectic_cadence: Number(event.target.value) })
+            }
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t(
+            "pages.agent.tools.memory.honcho.context_tokens",
+            "Memory Token Cap",
+          )}
+          description={t(
+            "pages.agent.tools.memory.honcho.context_tokens_hint",
+            "Maximum tokens for the injected memory block. 0 leaves it uncapped.",
+          )}
+        >
+          <Input
+            type="number"
+            min={0}
+            className="bg-muted/40 hover:bg-muted/60 focus-visible:bg-background focus-visible:border-border/80 focus-visible:ring-foreground/5 w-full rounded-xl border-transparent shadow-none transition-all duration-300 sm:w-32"
+            value={draft.context_tokens ?? 0}
+            onChange={(event) =>
+              onUpdate({ context_tokens: Number(event.target.value) })
             }
           />
         </SettingRow>

@@ -108,11 +108,24 @@ export interface HonchoConfig {
   clear_api_key?: boolean
   workspace_id?: string
   user_peer_id?: string
+  agent_peer_id?: string
   trigger: "auto" | "ask"
   sync_every_turns: number
+  recall_mode?: MemoryRecallMode
+  context_cadence?: number
+  dialectic_cadence?: number
+  dialectic_level?: HonchoDialecticLevel
+  context_tokens?: number
 }
 
 export type MemoryRecallMode = "hybrid" | "context" | "tools" | "off"
+
+export type HonchoDialecticLevel =
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "max"
 
 export interface Mem0Config {
   enabled: boolean
