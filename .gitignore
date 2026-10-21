@@ -75,3 +75,6 @@ docker/data
 
 .omc/
 .worktrees/
+
+# AI agent knowledge graph output
+graphify-out/
