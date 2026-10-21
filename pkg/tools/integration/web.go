@@ -2148,6 +2148,7 @@ func buildWebSearchMeta(args map[string]any, hybrid bool, providers interface{})
 		meta["query"] = strings.TrimSpace(query)
 	}
 	b, _ := json.Marshal(meta)
+	logger.InfoCF("web_search", "Search resolved", meta)
 	return string(b)
 }
 
