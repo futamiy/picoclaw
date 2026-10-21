@@ -111,28 +111,34 @@ func (al *AgentLoop) publishResponseWithActionsIfNeeded(
 	err error,
 ) {
 	actions := al.recoverableActionsFor(response, err)
-	al.publishResponseIfNeededWithActions(ctx, channel, chatID, sessionKey, response, actions)
+	// Error text must always reach the user: the message tool may have sent a
+	// partial answer before the turn failed, but that is not a substitute for
+	// the failure notice.
+	al.publishResponseIfNeededWithActions(ctx, channel, chatID, sessionKey, response, actions, err == nil)
 }
 
 func (al *AgentLoop) PublishResponseIfNeeded(ctx context.Context, channel, chatID, sessionKey, response string) {
-	al.publishResponseIfNeededWithActions(ctx, channel, chatID, sessionKey, response, nil)
+	al.publishResponseIfNeededWithActions(ctx, channel, chatID, sessionKey, response, nil, true)
 }
 
 func (al *AgentLoop) publishResponseIfNeededWithActions(
 	ctx context.Context,
 	channel, chatID, sessionKey, response string,
 	actions []bus.MessageAction,
+	suppressIfAlreadySent bool,
 ) {
 	if response == "" {
 		return
 	}
 
 	alreadySentToSameChat := false
-	defaultAgent := al.GetRegistry().GetDefaultAgent()
-	if defaultAgent != nil {
-		if tool, ok := defaultAgent.Tools.Get("message"); ok {
-			if mt, ok := tool.(*tools.MessageTool); ok {
-				alreadySentToSameChat = mt.HasSentTo(sessionKey, channel, chatID)
+	if suppressIfAlreadySent {
+		defaultAgent := al.GetRegistry().GetDefaultAgent()
+		if defaultAgent != nil {
+			if tool, ok := defaultAgent.Tools.Get("message"); ok {
+				if mt, ok := tool.(*tools.MessageTool); ok {
+					alreadySentToSameChat = mt.HasSentTo(sessionKey, channel, chatID)
+				}
 			}
 		}
 	}

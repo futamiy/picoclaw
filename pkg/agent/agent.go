@@ -263,6 +263,11 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 								"chat_id":     m.ChatID,
 								"panic":       fmt.Sprintf("%v", r),
 							})
+						// A panic otherwise ends the turn silently; tell the user.
+						if ctx.Err() == nil {
+							al.maybePublishError(ctx, m.Channel, m.ChatID, sessionKey,
+								fmt.Errorf("internal error while processing the message: %v", r))
+						}
 					}
 				}()
 				defer func() { <-al.workerSem }() // Release slot

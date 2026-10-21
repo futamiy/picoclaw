@@ -1,10 +1,13 @@
 package agent
 
 import (
+	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
+	"github.com/sipeed/picoclaw/pkg/tools"
 )
 
 func TestIsRecoverableProcessingError(t *testing.T) {
@@ -61,5 +64,46 @@ func TestRecoverableActionsFor(t *testing.T) {
 	cfg.Agents.Defaults.ErrorActions.ContinueButton = boolPtr(false)
 	if a := al.recoverableActionsFor(toolLimitResponse, nil); len(a) != 0 {
 		t.Fatalf("expected no actions when disabled, got %#v", a)
+	}
+}
+
+// A turn that already sent something through the message tool must still get
+// its failure notice: suppression only applies to normal responses.
+func TestMaybePublishError_NotSuppressedByMessageTool(t *testing.T) {
+	al, _, msgBus, _, cleanup := newTestAgentLoop(t)
+	defer cleanup()
+
+	defaultAgent := al.registry.GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("expected default agent")
+	}
+	mt := tools.NewMessageTool()
+	mt.SetSendCallback(func(
+		_ context.Context,
+		_, _, _, _ string,
+		_ []bus.MediaPart,
+	) error {
+		return nil
+	})
+	defaultAgent.Tools.Register(mt)
+	if res := mt.Execute(
+		tools.WithToolSessionContext(context.Background(), "main", "session-1", nil),
+		map[string]any{"content": "partial", "channel": "telegram", "chat_id": "123"},
+	); res == nil || res.IsError {
+		t.Fatalf("message tool execute failed: %+v", res)
+	}
+
+	al.maybePublishError(context.Background(), "telegram", "123", "session-1", errors.New("unexpected EOF"))
+
+	select {
+	case outbound := <-msgBus.OutboundChan():
+		if !strings.Contains(outbound.Content, "Error processing message") {
+			t.Fatalf("outbound content = %q, want error notice", outbound.Content)
+		}
+		if len(outbound.Actions) != 1 || outbound.Actions[0].Type != bus.ActionContinue {
+			t.Fatalf("actions = %#v, want one continue action", outbound.Actions)
+		}
+	default:
+		t.Fatal("expected the error notice to be published")
 	}
 }
