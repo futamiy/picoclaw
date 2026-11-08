@@ -882,8 +882,13 @@ func retryAfterWaitDelay(exec *turnExecution, err error, retryReason string) (ti
 		return 0, false
 	}
 	failErr := providers.ClassifyError(err, "", "")
-	if failErr == nil || failErr.Reason != providers.FailoverRateLimit || failErr.RetryAfter <= 0 {
+	if failErr == nil || failErr.Reason != providers.FailoverRateLimit {
 		return 0, false
+	}
+	if failErr.RetryAfter <= 0 {
+		// No header from the provider: use the documented default wait rather
+		// than the shorter blind exponential backoff.
+		return providers.DefaultRetryAfterWait(), true
 	}
 	return common.ClampRetryAfter(failErr.RetryAfter), true
 }

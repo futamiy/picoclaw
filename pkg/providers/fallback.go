@@ -18,6 +18,10 @@ const (
 	defaultRetryAfterWait = 5 * time.Second
 )
 
+// DefaultRetryAfterWait returns the wait used when a 429 carries no
+// Retry-After value.
+func DefaultRetryAfterWait() time.Duration { return defaultRetryAfterWait }
+
 // FallbackChain orchestrates model fallback across multiple candidates.
 type FallbackChain struct {
 	cooldown *CooldownTracker

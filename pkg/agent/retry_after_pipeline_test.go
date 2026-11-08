@@ -67,14 +67,30 @@ func TestRetryAfterWaitDelay_IgnoresFallbackModeAndMultipleCandidates(t *testing
 	}
 }
 
-func TestRetryAfterWaitDelay_NoHeaderFallsBackToExponential(t *testing.T) {
+func TestRetryAfterWaitDelay_NoHeaderUsesDefaultWait(t *testing.T) {
 	exec := &turnExecution{
 		activeCandidates: []providers.FallbackCandidate{
 			{Provider: "openai", Model: "gpt-4o-mini", RetryAfterMode: providers.RetryAfterWait},
 		},
 	}
 	err := errors.New("HTTP 429: status: 429 rate limit exceeded")
+	delay, ok := retryAfterWaitDelay(exec, err, "rate_limit")
+	if !ok {
+		t.Fatal("wait mode must still wait when the provider sends no Retry-After")
+	}
+	if delay != providers.DefaultRetryAfterWait() {
+		t.Fatalf("delay = %v, want %v", delay, providers.DefaultRetryAfterWait())
+	}
+}
+
+func TestRetryAfterWaitDelay_UsesExponentialOutsideWaitMode(t *testing.T) {
+	exec := &turnExecution{
+		activeCandidates: []providers.FallbackCandidate{
+			{Provider: "openai", Model: "gpt-4o-mini", RetryAfterMode: providers.RetryAfterFallback},
+		},
+	}
+	err := &common.HTTPError{StatusCode: http.StatusTooManyRequests, RetryAfter: 30 * time.Second}
 	if _, ok := retryAfterWaitDelay(exec, err, "rate_limit"); ok {
-		t.Fatal("without a Retry-After value the loop must keep its exponential backoff")
+		t.Fatal("fallback mode must not override the retry loop backoff")
 	}
 }
