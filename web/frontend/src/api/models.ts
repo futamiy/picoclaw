@@ -16,6 +16,7 @@ export interface ModelInfo {
   connect_mode?: string
   workspace?: string
   rpm?: number
+  retry_after?: string
   max_tokens_field?: string
   request_timeout?: number
   thinking_level?: string

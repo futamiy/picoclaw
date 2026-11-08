@@ -24,6 +24,13 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -65,6 +72,7 @@ interface AddForm {
   connectMode: string
   workspace: string
   rpm: string
+  retryAfter: string
   maxTokensField: string
   requestTimeout: string
   thinkingLevel: string
@@ -85,6 +93,7 @@ const EMPTY_ADD_FORM: AddForm = {
   connectMode: "",
   workspace: "",
   rpm: "",
+  retryAfter: "",
   maxTokensField: "",
   requestTimeout: "",
   thinkingLevel: "",
@@ -400,6 +409,7 @@ export function AddModelSheet({
         connect_mode: form.connectMode.trim() || undefined,
         workspace: form.workspace.trim() || undefined,
         rpm: form.rpm ? Number(form.rpm) : undefined,
+        retry_after: form.retryAfter,
         max_tokens_field: form.maxTokensField.trim() || undefined,
         request_timeout: form.requestTimeout
           ? Number(form.requestTimeout)
@@ -717,6 +727,36 @@ export function AddModelSheet({
                     type="number"
                     min={0}
                   />
+                </Field>
+
+                <Field
+                  label={t("models.field.retryAfter")}
+                  hint={t("models.field.retryAfterHint")}
+                >
+                  <Select
+                    value={form.retryAfter || "default"}
+                    onValueChange={(v) =>
+                      setForm((f) => ({
+                        ...f,
+                        retryAfter: v === "default" ? "" : v,
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">
+                        {t("models.field.retryAfterDefault")}
+                      </SelectItem>
+                      <SelectItem value="fallback">
+                        {t("models.field.retryAfterFallback")}
+                      </SelectItem>
+                      <SelectItem value="wait">
+                        {t("models.field.retryAfterWait")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
                 </Field>
 
                 <Field

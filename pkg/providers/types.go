@@ -3,6 +3,8 @@ package providers
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/sipeed/picoclaw/pkg/providers/protocoltypes"
 )
@@ -95,13 +97,50 @@ const (
 	FailoverUnknown         FailoverReason = "unknown"
 )
 
+// RetryAfter modes control what a model does when it receives a rate-limit
+// (429) error. "fallback" continues to the next configured model; "wait"
+// sleeps for the provider's Retry-After and retries the same model, and is
+// only honored when the model has no fallback candidate.
+const (
+	RetryAfterFallback = "fallback"
+	RetryAfterWait     = "wait"
+)
+
+// NormalizeRetryAfterMode returns a valid retry_after mode, or "" when the
+// input should be treated as unset (empty string, "default", or garbage).
+func NormalizeRetryAfterMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case RetryAfterWait:
+		return RetryAfterWait
+	case RetryAfterFallback:
+		return RetryAfterFallback
+	default:
+		return ""
+	}
+}
+
+// ResolveRetryAfterMode resolves the effective mode: the per-model setting
+// wins, then the global default, and finally "fallback".
+func ResolveRetryAfterMode(modelValue, globalValue string) string {
+	if mode := NormalizeRetryAfterMode(modelValue); mode != "" {
+		return mode
+	}
+	if mode := NormalizeRetryAfterMode(globalValue); mode != "" {
+		return mode
+	}
+	return RetryAfterFallback
+}
+
 // FailoverError wraps an LLM provider error with classification metadata.
 type FailoverError struct {
 	Reason   FailoverReason
 	Provider string
 	Model    string
 	Status   int
-	Wrapped  error
+	// RetryAfter is the provider-requested wait for rate-limit errors. Zero
+	// when the provider did not send one.
+	RetryAfter time.Duration
+	Wrapped    error
 }
 
 func (e *FailoverError) Error() string {

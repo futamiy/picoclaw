@@ -11,11 +11,13 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -379,6 +381,9 @@ type HTTPError struct {
 	ContentType string
 	APIBase     string
 	IsHTML      bool
+	// RetryAfter is the provider-requested wait parsed from the Retry-After
+	// header. Zero when the response carried none.
+	RetryAfter time.Duration
 }
 
 func (e *HTTPError) Error() string {
@@ -401,6 +406,10 @@ func (e *HTTPError) Error() string {
 	)
 }
 
+// MaxRetryAfterDelay caps how long a retry_after=wait model may sleep on a 429.
+// It is the historical 60s retry ceiling plus 45s of headroom.
+const MaxRetryAfterDelay = 105 * time.Second
+
 // HandleErrorResponse reads a non-200 response body and returns an appropriate error.
 func HandleErrorResponse(resp *http.Response, apiBase string) error {
 	contentType := resp.Header.Get("Content-Type")
@@ -408,15 +417,57 @@ func HandleErrorResponse(resp *http.Response, apiBase string) error {
 	if readErr != nil {
 		return fmt.Errorf("failed to read response: %w", readErr)
 	}
+	retryAfter := ParseRetryAfter(resp.Header.Get("Retry-After"), resp.Header.Get("Date"))
 	if LooksLikeHTML(body, contentType) {
-		return WrapHTMLResponseError(resp.StatusCode, body, contentType, apiBase)
+		err := WrapHTMLResponseError(resp.StatusCode, body, contentType, apiBase)
+		var httpErr *HTTPError
+		if errors.As(err, &httpErr) {
+			httpErr.RetryAfter = retryAfter
+		}
+		return err
 	}
 	return &HTTPError{
 		StatusCode:  resp.StatusCode,
 		BodyPreview: ResponsePreview(body, 128),
 		ContentType: contentType,
 		APIBase:     apiBase,
+		RetryAfter:  retryAfter,
 	}
+}
+
+// ParseRetryAfter converts a Retry-After header value (delta-seconds or an
+// HTTP date) into a duration capped at MaxRetryAfterDelay. It returns 0 when
+// the header is absent or unparseable.
+func ParseRetryAfter(value, date string) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		return clampRetryAfter(time.Duration(seconds) * time.Second)
+	}
+	when, err := http.ParseTime(value)
+	if err != nil {
+		return 0
+	}
+	delay := time.Until(when)
+	if serverDate, dateErr := http.ParseTime(strings.TrimSpace(date)); dateErr == nil {
+		delay = when.Sub(serverDate)
+	}
+	if delay <= 0 {
+		return 0
+	}
+	return clampRetryAfter(delay)
+}
+
+func clampRetryAfter(delay time.Duration) time.Duration {
+	if delay <= 0 {
+		return 0
+	}
+	return min(delay, MaxRetryAfterDelay)
 }
 
 // ReadAndParseResponse peeks at the response body to detect HTML errors,
@@ -523,4 +574,9 @@ func AsFloat(v any) (float64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// ClampRetryAfter caps a provider-requested wait at MaxRetryAfterDelay.
+func ClampRetryAfter(delay time.Duration) time.Duration {
+	return clampRetryAfter(delay)
 }

@@ -13,6 +13,7 @@ import (
 	runtimeevents "github.com/sipeed/picoclaw/pkg/events"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/providers"
+	"github.com/sipeed/picoclaw/pkg/providers/common"
 )
 
 // CallLLM performs an LLM call with fallback support, hook invocation, and retry logic.
@@ -338,6 +339,9 @@ func (p *Pipeline) CallLLM(
 		if isTransientError && retry < maxRetries {
 			// Exponential backoff (like opencode): 2^retry * base.
 			backoff := time.Duration(backoffSecs) * time.Second * time.Duration(1<<retry)
+			if delay, ok := retryAfterWaitDelay(exec, err, retryReason); ok {
+				backoff = delay
+			}
 			// The stream connected and streamed output for a while before being
 			// cut mid-way: the link is alive, so restart the wait at the
 			// first-level retry instead of escalating.
@@ -865,4 +869,21 @@ func transientLLMRetryReason(err error) (string, bool) {
 	}
 
 	return "", false
+}
+
+// retryAfterWaitDelay returns the provider's requested wait when the active
+// model is a single candidate configured with retry_after=wait, so the retry
+// loop sleeps as long as the provider asked instead of using blind backoff.
+func retryAfterWaitDelay(exec *turnExecution, err error, retryReason string) (time.Duration, bool) {
+	if exec == nil || retryReason != "rate_limit" || len(exec.activeCandidates) != 1 {
+		return 0, false
+	}
+	if exec.activeCandidates[0].RetryAfterMode != providers.RetryAfterWait {
+		return 0, false
+	}
+	failErr := providers.ClassifyError(err, "", "")
+	if failErr == nil || failErr.Reason != providers.FailoverRateLimit || failErr.RetryAfter <= 0 {
+		return 0, false
+	}
+	return common.ClampRetryAfter(failErr.RetryAfter), true
 }

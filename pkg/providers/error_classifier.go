@@ -6,8 +6,10 @@ import (
 	"io"
 	"net"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/sipeed/picoclaw/pkg/providers/common"
 )
@@ -206,22 +208,24 @@ func ClassifyError(err error, provider, model string) *FailoverError {
 	if errors.As(err, &httpErr) && httpErr != nil {
 		if reason := classifyByStatus(httpErr.StatusCode); reason != "" {
 			return &FailoverError{
-				Reason:   reason,
-				Provider: provider,
-				Model:    model,
-				Status:   httpErr.StatusCode,
-				Wrapped:  err,
+				Reason:     reason,
+				Provider:   provider,
+				Model:      model,
+				Status:     httpErr.StatusCode,
+				RetryAfter: httpErr.RetryAfter,
+				Wrapped:    err,
 			}
 		}
 	}
 	if status := extractHTTPStatus(msg); status > 0 {
 		if reason := classifyByStatus(status); reason != "" {
 			return &FailoverError{
-				Reason:   reason,
-				Provider: provider,
-				Model:    model,
-				Status:   status,
-				Wrapped:  err,
+				Reason:     reason,
+				Provider:   provider,
+				Model:      model,
+				Status:     status,
+				RetryAfter: retryAfterForReason(reason, retryAfterFromError(err), msg),
+				Wrapped:    err,
 			}
 		}
 	}
@@ -229,14 +233,55 @@ func ClassifyError(err error, provider, model string) *FailoverError {
 	// Message pattern matching (priority order from OpenClaw).
 	if reason := classifyByMessage(msg); reason != "" {
 		return &FailoverError{
-			Reason:   reason,
-			Provider: provider,
-			Model:    model,
-			Wrapped:  err,
+			Reason:     reason,
+			Provider:   provider,
+			Model:      model,
+			RetryAfter: retryAfterForReason(reason, 0, msg),
+			Wrapped:    err,
 		}
 	}
 
 	return nil
+}
+
+// retryAfterForReason returns the provider-requested wait for rate-limit
+// errors, falling back to a retry_after value embedded in the error message
+// (some OpenAI-compatible gateways report it in the JSON body instead of a
+// header).
+func retryAfterForReason(reason FailoverReason, header time.Duration, msg string) time.Duration {
+	if reason != FailoverRateLimit {
+		return 0
+	}
+	if header > 0 {
+		return common.ClampRetryAfter(header)
+	}
+	return parseRetryAfterFromMessage(msg)
+}
+
+// retryAfterFromError digs a provider-weighted wait out of an already
+// classified FailoverError.
+func retryAfterFromError(err error) time.Duration {
+	var failErr *FailoverError
+	if errors.As(err, &failErr) && failErr != nil {
+		return failErr.RetryAfter
+	}
+	return 0
+}
+
+var retryAfterMessagePattern = regexp.MustCompile(
+	`(?i)retry[-_ ]?after["'\s:=]*(\d+(?:\.\d+)?)`,
+)
+
+func parseRetryAfterFromMessage(msg string) time.Duration {
+	m := retryAfterMessagePattern.FindStringSubmatch(msg)
+	if len(m) < 2 {
+		return 0
+	}
+	secs, err := strconv.ParseFloat(m[1], 64)
+	if err != nil || secs <= 0 {
+		return 0
+	}
+	return common.ClampRetryAfter(time.Duration(secs * float64(time.Second)))
 }
 
 // classifyByErrorType maps concrete transport-layer error types to a retryable

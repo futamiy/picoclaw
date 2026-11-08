@@ -63,6 +63,7 @@ model_list:
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `rpm` | `int` | `0` | Requests per minute. `0` means no limit. |
+| `retry_after` | `string` | inherit global → `fallback` | 429 policy: `fallback` or `wait`. |
 
 ### Interaction with fallbacks
 
@@ -81,6 +82,49 @@ model_list:
 If the current candidate's bucket is empty and there are more candidates available, PicoClaw skips the locally saturated candidate and tries the next fallback immediately. Only the last remaining candidate waits for a token to refill. If the context deadline is hit while waiting on that last candidate, the wait error propagates.
 
 For `model_list` aliases that resolve to the same underlying provider/model, rate limiting is keyed by the stable config identity (for example `model_name`) rather than the resolved runtime model string. This preserves distinct RPM settings for multi-key and alias-based configurations.
+
+### Handling 429 responses: `retry_after`
+
+`rpm` prevents most 429s, but a model with a low TPM (tokens per minute) quota can still be rate limited. `retry_after` decides what happens **when a 429 arrives**:
+
+| Value | Behaviour |
+|---|---|
+| `fallback` (default) | Mark the model as rate limited and continue to the next fallback candidate immediately. |
+| `wait` | Sleep for the provider's `Retry-After` and retry the **same** model. Only honoured when the model has **no** fallback candidate. |
+
+Resolution order (first match wins):
+
+1. `model_list[i].retry_after` — per-model override.
+2. `agents.defaults.retry_after` — global policy for every model that does not set its own.
+3. `fallback` — built-in default.
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "retry_after": "fallback"
+    }
+  },
+  "model_list": [
+    {
+      "model_name": "cheap-tpm-model",
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "rpm": 3,
+      "retry_after": "wait"
+    }
+  ]
+}
+```
+
+Details:
+
+- The wait duration comes from the provider's `Retry-After` header (delta-seconds or an HTTP date), falling back to a value embedded in the error body (`retry_after` in JSON).
+- It is capped at **105 seconds** (`maxRetrySleepDuration` 60s + 45s headroom).
+- When the header is missing, `wait` uses a 5 second default.
+- A single turn sleeps and retries at most **2** times; after that the turn returns the 429 error.
+- With more than one candidate (`model_fallbacks`, or a fallback chain), `wait` is ignored: switching models is always faster than sleeping.
+- Cancelling the turn interrupts the sleep immediately.
 
 ### Burst behaviour
 

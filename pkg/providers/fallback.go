@@ -5,6 +5,17 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/sipeed/picoclaw/pkg/logger"
+	"github.com/sipeed/picoclaw/pkg/providers/common"
+)
+
+const (
+	// maxRetryAfterWaitAttempts bounds how many times a single-model
+	// retry_after=wait candidate may sleep and retry within one turn.
+	maxRetryAfterWaitAttempts = 2
+	// defaultRetryAfterWait is used when the provider sends no Retry-After.
+	defaultRetryAfterWait = 5 * time.Second
 )
 
 // FallbackChain orchestrates model fallback across multiple candidates.
@@ -19,9 +30,12 @@ type FallbackCandidate struct {
 	Model       string
 	DisplayName string // optional configured alias/raw model label for persistence/UI
 	RPM         int    // requests per minute; 0 means unrestricted
-	IdentityKey string // optional stable config identity for cooldown/rate limiting
-	ConfigIndex int    // optional 1-based model_list index selected during resolution
-	ConfigKey   string // optional hashed model_list identity, stable across reordering
+	// RetryAfterMode is the resolved 429 policy for this candidate:
+	// RetryAfterWait or RetryAfterFallback.
+	RetryAfterMode string
+	IdentityKey    string // optional stable config identity for cooldown/rate limiting
+	ConfigIndex    int    // optional 1-based model_list index selected during resolution
+	ConfigKey      string // optional hashed model_list identity, stable across reordering
 }
 
 // StableKey returns the candidate's config-level identity when available,
@@ -150,8 +164,10 @@ func (fc *FallbackChain) ExecuteCandidate(
 	result := &FallbackResult{
 		Attempts: make([]FallbackAttempt, 0, len(candidates)),
 	}
+	waitAttempts := 0
 
-	for i, candidate := range candidates {
+	for i := 0; i < len(candidates); i++ {
+		candidate := candidates[i]
 		// Check context before each attempt.
 		if ctx.Err() == context.Canceled {
 			return nil, context.Canceled
@@ -254,6 +270,39 @@ func (fc *FallbackChain) ExecuteCandidate(
 				Duration: elapsed,
 			})
 			return nil, failErr
+		}
+
+		// Rate limited with retry_after=wait and no fallback to switch to:
+		// sleep for the provider's requested delay and retry the same model.
+		if failErr.Reason == FailoverRateLimit &&
+			candidate.RetryAfterMode == RetryAfterWait &&
+			len(candidates) == 1 &&
+			waitAttempts < maxRetryAfterWaitAttempts {
+			waitAttempts++
+			delay := failErr.RetryAfter
+			if delay <= 0 {
+				delay = defaultRetryAfterWait
+			}
+			delay = common.ClampRetryAfter(delay)
+			result.Attempts = append(result.Attempts, FallbackAttempt{
+				Provider: candidate.Provider,
+				Model:    candidate.Model,
+				Error:    failErr,
+				Reason:   failErr.Reason,
+				Duration: elapsed,
+			})
+			logger.WarnCF("providers", "Rate limited with retry_after=wait, sleeping before retry", map[string]any{
+				"provider": candidate.Provider,
+				"model":    candidate.Model,
+				"delay":    delay.String(),
+				"attempt":  waitAttempts,
+			})
+			if sleepErr := sleepWithContext(ctx, delay); sleepErr != nil {
+				return nil, sleepErr
+			}
+			// Retry the same candidate without advancing the loop.
+			i--
+			continue
 		}
 
 		// Retriable error: mark failure and continue to next candidate.
@@ -414,4 +463,19 @@ func (e *FallbackExhaustedError) Error() string {
 		}
 	}
 	return sb.String()
+}
+
+// sleepWithContext waits for d unless ctx is canceled first.
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

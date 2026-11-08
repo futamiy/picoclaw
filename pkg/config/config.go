@@ -1020,8 +1020,12 @@ type AgentDefaults struct {
 	TurnProfile               TurnProfileConfig  `json:"turn_profile,omitempty"`
 	MaxLLMRetries             int                `json:"max_llm_retries,omitempty"        env:"PICOCLAW_AGENTS_DEFAULTS_MAX_LLM_RETRIES"`
 	LLMRetryBackoffSecs       int                `json:"llm_retry_backoff_secs,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_LLM_RETRY_BACKOFF_SECS"`
-	Memory                    MemoryConfig       `json:"memory,omitempty"`
-	Experimental              ExperimentalConfig `json:"experimental,omitempty"`
+	// RetryAfter is the global default 429 policy: "fallback" (default) skips to
+	// the next model, "wait" sleeps for Retry-After and retries the same model
+	// when no fallback is configured. A model's own retry_after overrides this.
+	RetryAfter   string             `json:"retry_after,omitempty" env:"PICOCLAW_AGENTS_DEFAULTS_RETRY_AFTER"`
+	Memory       MemoryConfig       `json:"memory,omitempty"`
+	Experimental ExperimentalConfig `json:"experimental,omitempty"`
 }
 
 // ExperimentalConfig groups opt-in, behavior-changing settings. These are
@@ -1413,6 +1417,7 @@ type ModelConfig struct {
 
 	// Optional optimizations
 	RPM                 int                  `json:"rpm,omitempty"`              // Requests per minute limit
+	RetryAfter          string               `json:"retry_after,omitempty"`      // 429 handling: "wait" or "fallback" (empty = inherit global)
 	MaxTokensField      string               `json:"max_tokens_field,omitempty"` // Field name for max tokens (e.g., "max_completion_tokens")
 	RequestTimeout      int                  `json:"request_timeout,omitempty"`
 	ThinkingLevel       string               `json:"thinking_level,omitempty"`        // Extended thinking: off|low|medium|high|xhigh|adaptive
@@ -1473,6 +1478,11 @@ func (c *ModelConfig) Validate() error {
 	// Reject consecutive slashes
 	if strings.Contains(c.Model, "//") {
 		return fmt.Errorf("model identifier must not contain //")
+	}
+	switch strings.ToLower(strings.TrimSpace(c.RetryAfter)) {
+	case "", "default", "wait", "fallback":
+	default:
+		return fmt.Errorf("retry_after must be one of: default, wait, fallback")
 	}
 	return nil
 }

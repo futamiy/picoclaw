@@ -26,6 +26,13 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -66,6 +73,7 @@ interface EditForm {
   connectMode: string
   workspace: string
   rpm: string
+  retryAfter: string
   maxTokensField: string
   requestTimeout: string
   thinkingLevel: string
@@ -97,6 +105,7 @@ function buildInitialEditForm(model: ModelInfo): EditForm {
     connectMode: model.connect_mode ?? "",
     workspace: model.workspace ?? "",
     rpm: model.rpm ? String(model.rpm) : "",
+    retryAfter: model.retry_after ?? "",
     maxTokensField: model.max_tokens_field ?? "",
     requestTimeout: model.request_timeout ? String(model.request_timeout) : "",
     thinkingLevel: model.thinking_level ?? "",
@@ -132,6 +141,7 @@ export function EditModelSheet({
     connectMode: "",
     workspace: "",
     rpm: "",
+    retryAfter: "",
     maxTokensField: "",
     requestTimeout: "",
     thinkingLevel: "",
@@ -386,6 +396,7 @@ export function EditModelSheet({
         connect_mode: form.connectMode.trim() || undefined,
         workspace: form.workspace.trim() || undefined,
         rpm: form.rpm ? Number(form.rpm) : undefined,
+        retry_after: form.retryAfter,
         max_tokens_field: form.maxTokensField.trim() || undefined,
         request_timeout: form.requestTimeout
           ? Number(form.requestTimeout)
@@ -691,6 +702,36 @@ export function EditModelSheet({
                     type="number"
                     min={0}
                   />
+                </Field>
+
+                <Field
+                  label={t("models.field.retryAfter")}
+                  hint={t("models.field.retryAfterHint")}
+                >
+                  <Select
+                    value={form.retryAfter || "default"}
+                    onValueChange={(v) =>
+                      setForm((f) => ({
+                        ...f,
+                        retryAfter: v === "default" ? "" : v,
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">
+                        {t("models.field.retryAfterDefault")}
+                      </SelectItem>
+                      <SelectItem value="fallback">
+                        {t("models.field.retryAfterFallback")}
+                      </SelectItem>
+                      <SelectItem value="wait">
+                        {t("models.field.retryAfterWait")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
                 </Field>
 
                 <Field

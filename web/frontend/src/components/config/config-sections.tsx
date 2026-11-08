@@ -225,6 +225,29 @@ export function AgentDefaultsSection({
       </Field>
 
       <Field
+        label={t("pages.config.retry_after")}
+        hint={t("pages.config.retry_after_hint")}
+        layout="setting-row"
+      >
+        <Select
+          value={form.retryAfter || "fallback"}
+          onValueChange={(value) => onFieldChange("retryAfter", value)}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="fallback">
+              {t("pages.config.retry_after_fallback")}
+            </SelectItem>
+            <SelectItem value="wait">
+              {t("pages.config.retry_after_wait")}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+
+      <Field
         label={t("pages.config.summarize_threshold")}
         hint={t("pages.config.summarize_threshold_hint")}
         layout="setting-row"

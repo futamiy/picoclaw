@@ -355,7 +355,12 @@
       "extraBodyHint": "Additional JSON fields to inject into the request body, e.g. {\"reasoning_split\": true}.",
       "customHeaders": "Custom Headers",
       "customHeadersHint": "Additional HTTP headers to inject into every request, e.g. {\"X-Source\": \"coding-plan\"}.",
-      "invalidJson": "Invalid JSON format"
+      "invalidJson": "Invalid JSON format",
+      "retryAfter": "429 Handling (Retry-After)",
+      "retryAfterHint": "What to do on a rate-limit (429) error. Default inherits the global policy. Wait only applies when the model has no fallback.",
+      "retryAfterDefault": "Default (global)",
+      "retryAfterFallback": "Switch to fallback model",
+      "retryAfterWait": "Wait, then retry same model"
     },
     "edit": {
       "title": "Configure {{name}}",
@@ -1092,7 +1097,11 @@
       "factory_reset_confirm_desc": "This will reset all configuration to factory defaults. API keys and security credentials will be preserved. A backup of the current config will be created.",
       "factory_reset_confirm": "Reset to Defaults",
       "factory_reset_success": "Configuration has been reset to factory defaults.",
-      "factory_reset_error": "Failed to reset configuration."
+      "factory_reset_error": "Failed to reset configuration.",
+      "retry_after": "429 Handling Policy",
+      "retry_after_hint": "Global default for models without their own retry_after. Fallback switches to the next model; Wait sleeps for the Retry-After (max 105s) and retries the same model, only when no fallback exists.",
+      "retry_after_fallback": "Fallback model (default)",
+      "retry_after_wait": "Wait and retry same model"
     },
     "logs": {
       "log_level_error": "Failed to update log level.",

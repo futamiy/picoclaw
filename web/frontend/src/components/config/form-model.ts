@@ -18,6 +18,7 @@ export interface CoreConfigForm {
   maxTokens: string
   contextWindow: string
   maxToolIterations: string
+  retryAfter: string
   summarizeMessageThreshold: string
   summarizeTokenPercent: string
   autoCompress: boolean
@@ -133,6 +134,7 @@ export const EMPTY_FORM: CoreConfigForm = {
   maxTokens: "32768",
   contextWindow: "",
   maxToolIterations: "50",
+  retryAfter: "",
   summarizeMessageThreshold: "20",
   summarizeTokenPercent: "75",
   autoCompress: true,
@@ -378,6 +380,8 @@ export function buildFormFromConfig(config: unknown): CoreConfigForm {
       defaults.max_tool_iterations,
       EMPTY_FORM.maxToolIterations,
     ),
+    retryAfter:
+      typeof defaults.retry_after === "string" ? defaults.retry_after : "",
     summarizeMessageThreshold: asNumberString(
       defaults.summarize_message_threshold,
       EMPTY_FORM.summarizeMessageThreshold,

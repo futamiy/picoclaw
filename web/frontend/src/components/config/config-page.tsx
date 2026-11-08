@@ -594,6 +594,7 @@ export function ConfigPage() {
               max_tokens: maxTokens,
               context_window: contextWindow,
               max_tool_iterations: maxToolIterations,
+              retry_after: form.retryAfter,
               summarize_message_threshold: summarizeMessageThreshold,
               summarize_token_percent: summarizeTokenPercent,
               experimental: {

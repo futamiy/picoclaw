@@ -49,6 +49,7 @@ type modelResponse struct {
 	ConnectMode         string                      `json:"connect_mode,omitempty"`
 	Workspace           string                      `json:"workspace,omitempty"`
 	RPM                 int                         `json:"rpm,omitempty"`
+	RetryAfter          string                      `json:"retry_after,omitempty"`
 	MaxTokensField      string                      `json:"max_tokens_field,omitempty"`
 	RequestTimeout      int                         `json:"request_timeout,omitempty"`
 	ThinkingLevel       string                      `json:"thinking_level,omitempty"`
@@ -152,6 +153,7 @@ func normalizeIncomingModelConfig(mc *config.ModelConfig, defaultProvider string
 	mc.Model = strings.TrimSpace(mc.Model)
 	mc.Provider = strings.TrimSpace(mc.Provider)
 	mc.AuthMethod = strings.ToLower(strings.TrimSpace(mc.AuthMethod))
+	mc.RetryAfter = strings.ToLower(strings.TrimSpace(mc.RetryAfter))
 	if mc.Provider == "" {
 		mc.Provider, mc.Model = providers.SplitModelProviderAndID(mc.Model, defaultProvider)
 	} else {
@@ -629,6 +631,7 @@ func (h *Handler) handleListModels(w http.ResponseWriter, r *http.Request) {
 			ConnectMode:         m.ConnectMode,
 			Workspace:           m.Workspace,
 			RPM:                 m.RPM,
+			RetryAfter:          m.RetryAfter,
 			MaxTokensField:      m.MaxTokensField,
 			RequestTimeout:      m.RequestTimeout,
 			ThinkingLevel:       m.ThinkingLevel,

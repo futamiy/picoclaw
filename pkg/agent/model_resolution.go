@@ -53,6 +53,7 @@ func modelConfigResolutionKey(defaultProvider string, mc *config.ModelConfig) st
 		Enabled             bool                        `json:"enabled"`
 		UserAgent           string                      `json:"user_agent"`
 		RPM                 int                         `json:"rpm"`
+		RetryAfter          string                      `json:"retry_after"`
 		RequestTimeout      int                         `json:"request_timeout"`
 		MaxTokensField      string                      `json:"max_tokens_field"`
 		ThinkingLevel       string                      `json:"thinking_level"`
@@ -65,6 +66,7 @@ func modelConfigResolutionKey(defaultProvider string, mc *config.ModelConfig) st
 		APIBase: mc.APIBase, Proxy: mc.Proxy, AuthMethod: mc.AuthMethod,
 		ConnectMode: mc.ConnectMode, Workspace: mc.Workspace, APIKeys: apiKeys,
 		Enabled: mc.Enabled, UserAgent: mc.UserAgent, RPM: mc.RPM,
+		RetryAfter:     mc.RetryAfter,
 		RequestTimeout: mc.RequestTimeout, MaxTokensField: mc.MaxTokensField,
 		ThinkingLevel: mc.ThinkingLevel, ToolSchemaTransform: mc.ToolSchemaTransform,
 		Streaming: mc.Streaming, ExtraBody: mc.ExtraBody, CustomHeaders: mc.CustomHeaders,
@@ -123,12 +125,13 @@ func candidateFromModelConfig(
 	}
 
 	return providers.FallbackCandidate{
-		Provider:    protocol,
-		Model:       modelID,
-		DisplayName: strings.TrimSpace(mc.ModelName),
-		RPM:         mc.RPM,
-		IdentityKey: modelConfigIdentityKey(mc),
-		ConfigKey:   modelConfigResolutionKey(defaultProvider, mc),
+		Provider:       protocol,
+		Model:          modelID,
+		DisplayName:    strings.TrimSpace(mc.ModelName),
+		RPM:            mc.RPM,
+		RetryAfterMode: providers.RetryAfterFallback,
+		IdentityKey:    modelConfigIdentityKey(mc),
+		ConfigKey:      modelConfigResolutionKey(defaultProvider, mc),
 	}, true
 }
 
@@ -187,12 +190,17 @@ func resolveModelCandidate(
 		return providers.FallbackCandidate{}, false
 	}
 	defaultProvider = effectiveDefaultProvider(defaultProvider)
+	globalRetryAfter := ""
+	if cfg != nil {
+		globalRetryAfter = cfg.Agents.Defaults.RetryAfter
+	}
 
 	if mc := lookupModelConfigByRef(cfg, raw, defaultProvider); mc != nil {
 		candidate, ok := candidateFromModelConfig(defaultProvider, mc)
 		if !ok {
 			return providers.FallbackCandidate{}, false
 		}
+		candidate.RetryAfterMode = providers.ResolveRetryAfterMode(mc.RetryAfter, globalRetryAfter)
 		for index, modelCfg := range cfg.ModelList {
 			if modelCfg == mc || modelConfigsResolveToSameEntry(modelCfg, mc, defaultProvider) {
 				candidate.ConfigIndex = index + 1
@@ -209,9 +217,10 @@ func resolveModelCandidate(
 	}
 
 	return providers.FallbackCandidate{
-		Provider:    ref.Provider,
-		Model:       ref.Model,
-		DisplayName: raw,
+		Provider:       ref.Provider,
+		Model:          ref.Model,
+		DisplayName:    raw,
+		RetryAfterMode: providers.ResolveRetryAfterMode("", globalRetryAfter),
 	}, true
 }
 
